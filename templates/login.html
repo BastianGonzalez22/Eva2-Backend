@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Iniciar Sesión - Transportes Express{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center align-items-center py-5">
+    <div class="col-md-6 col-lg-5 col-xl-4">
+        <div class="card border-0 shadow-lg rounded-4 p-4 p-sm-5 bg-white">
+            <div class="text-center mb-4">
+                <div class="d-inline-flex align-items-center justify-content-center bg-primary bg-opacity-10 text-primary rounded-circle mb-3" style="width: 64px; height: 64px;">
+                    <i class="bi bi-person-fill-lock fs-2"></i>
+                </div>
+                <h3 class="fw-bold mb-1">¡Bienvenido de vuelta!</h3>
+                <p class="text-muted small">Ingresa tus credenciales para acceder a tus pasajes</p>
+            </div>
+
+            <form method="POST">
+                {% csrf_token %}
+                
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-muted">Nombre de Usuario</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light border-0"><i class="bi bi-person text-secondary"></i></span>
+                        <input type="text" name="username" class="form-control bg-light border-0 py-2" placeholder="Ej: bastian_g" required autofocus>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label small fw-bold text-muted">Contraseña</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light border-0"><i class="bi bi-key text-secondary"></i></span>
+                        <input type="password" name="password" class="form-control bg-light border-0 py-2" placeholder="••••••••" required>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold shadow-sm mb-3">
+                    <i class="bi bi-box-arrow-in-right me-1"></i> Iniciar Sesión
+                </button>
+
+                <div class="text-center pt-2 border-top">
+                    <span class="small text-muted">¿No tienes una cuenta aún?</span>
+                    <a href="{% url 'registro' %}" class="small fw-bold text-primary text-decoration-none ms-1">Regístrate aquí</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

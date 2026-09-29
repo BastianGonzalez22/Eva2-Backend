@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Crear Cuenta - Transportes Express{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center align-items-center py-5">
+    <div class="col-md-6 col-lg-5 col-xl-4">
+        <div class="card border-0 shadow-lg rounded-4 p-4 p-sm-5 bg-white">
+            <div class="text-center mb-4">
+                <div class="d-inline-flex align-items-center justify-content-center bg-success bg-opacity-10 text-success rounded-circle mb-3" style="width: 64px; height: 64px;">
+                    <i class="bi bi-person-plus-fill fs-2"></i>
+                </div>
+                <h3 class="fw-bold mb-1">Crea tu Cuenta</h3>
+                <p class="text-muted small">Regístrate para reservar pasajes y gestionar tus viajes</p>
+            </div>
+
+            <form method="POST">
+                {% csrf_token %}
+                
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-muted">Nombre de Usuario</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light border-0"><i class="bi bi-person text-secondary"></i></span>
+                        <input type="text" name="username" class="form-control bg-light border-0 py-2" placeholder="Elige un nombre de usuario" required autofocus>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label small fw-bold text-muted">Contraseña</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light border-0"><i class="bi bi-shield-lock text-secondary"></i></span>
+                        <input type="password" name="password" class="form-control bg-light border-0 py-2" placeholder="Crea tu contraseña" required>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-success w-100 py-2 fw-semibold shadow-sm mb-3">
+                    <i class="bi bi-check-circle me-1"></i> Completar Registro
+                </button>
+
+                <div class="text-center pt-2 border-top">
+                    <span class="small text-muted">¿Ya tienes una cuenta?</span>
+                    <a href="{% url 'login' %}" class="small fw-bold text-success text-decoration-none ms-1">Inicia sesión</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,376 @@
+{% extends 'base.html' %}
+{% block title %}Panel de Gestión de Flota e Itinerarios{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h3 class="fw-bold mb-1 text-slate-800">🛠️ Panel de Gestión de Flota e Itinerarios</h3>
+        <p class="text-muted small mb-0">Control integral de ciudades, buses y servicios programados</p>
+    </div>
+    <span class="badge bg-warning text-dark fs-6 px-3 py-2 shadow-sm">
+        <i class="bi bi-shield-lock-fill me-1"></i> Admin: {{ user.username }}
+    </span>
+</div>
+
+<!-- FORMULARIOS DE REGISTRO RÁPIDO (CARDS) -->
+<div class="row g-4 mb-5">
+    <!-- 1. Registrar Ciudad -->
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0 h-100 rounded-4">
+            <div class="card-header bg-dark text-white fw-bold py-3 rounded-top-4">
+                🏙️ Nueva Ciudad / Terminal
+            </div>
+            <div class="card-body p-3">
+                <form method="POST">
+                    {% csrf_token %}
+                    <input type="hidden" name="accion" value="crear_ciudad">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">Nombre de la Ciudad</label>
+                        <input type="text" name="nombre_ciudad" class="form-control" placeholder="Ej: Chillán" required>
+                    </div>
+                    <button type="submit" class="btn btn-outline-primary w-100 fw-semibold">
+                        <i class="bi bi-plus-circle me-1"></i> Registrar Ciudad
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Registrar Bus -->
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0 h-100 rounded-4">
+            <div class="card-header bg-dark text-white fw-bold py-3 rounded-top-4">
+                🚌 Nuevo Bus
+            </div>
+            <div class="card-body p-3">
+                <form method="POST">
+                    {% csrf_token %}
+                    <input type="hidden" name="accion" value="crear_bus">
+                    <div class="mb-2">
+                        <label class="form-label small fw-bold text-muted">Patente del Bus</label>
+                        <input type="text" name="patente" class="form-control text-uppercase" placeholder="Ej: ABCD-12" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">Capacidad de Asientos</label>
+                        <input type="number" name="capacidad" class="form-control" value="40" min="10" max="60" required>
+                        <div style="font-size: 0.72rem;" class="text-muted mt-1">Genera automáticamente 10 Salón Cama y el resto Semicama.</div>
+                    </div>
+                    <button type="submit" class="btn btn-outline-success w-100 fw-semibold">
+                        <i class="bi bi-plus-circle me-1"></i> Registrar Bus
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Programar Recorrido -->
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0 h-100 rounded-4">
+            <div class="card-header bg-dark text-white fw-bold py-3 rounded-top-4">
+                🗺️ Programar Recorrido
+            </div>
+            <div class="card-body p-3">
+                <form method="POST">
+                    {% csrf_token %}
+                    <input type="hidden" name="accion" value="crear_servicio">
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label small fw-bold text-muted">Origen</label>
+                            <select name="origen" class="form-select form-select-sm" required>
+                                {% for c in ciudades %}
+                                    <option value="{{ c.id }}">{{ c.nombre }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small fw-bold text-muted">Destino</label>
+                            <select name="destino" class="form-select form-select-sm" required>
+                                {% for c in ciudades %}
+                                    <option value="{{ c.id }}">{{ c.nombre }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-bold text-muted">Bus Asignado</label>
+                        <select name="bus" class="form-select form-select-sm" required>
+                            {% for b in buses %}
+                                <option value="{{ b.id }}">{{ b.patente }} ({{ b.asientos.count }} asientos)</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-7">
+                            <label class="form-label small fw-bold text-muted">Salida</label>
+                            <input type="datetime-local" name="fecha_salida" min="{{ ahora_html }}" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="col-5">
+                            <label class="form-label small fw-bold text-muted">Tarifa Base</label>
+                            <input type="number" name="precio_base" class="form-control form-control-sm" placeholder="$10000" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-warning w-100 fw-bold">
+                        <i class="bi bi-send-check me-1"></i> Publicar Recorrido
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- SECCIÓN 1: TABLA DE RECORRIDOS (EDITAR Y ELIMINAR) -->
+<div class="card shadow-sm border-0 mb-5 rounded-4">
+    <div class="card-header bg-secondary text-white fw-bold py-3 rounded-top-4 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history me-1"></i> Itinerarios y Recorridos Programados</span>
+        <span class="badge bg-light text-dark">{{ servicios.count }} activos</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>ID</th>
+                    <th>Ruta</th>
+                    <th>Bus Asignado</th>
+                    <th>Fecha y Hora</th>
+                    <th>Tarifa Base</th>
+                    <th class="text-center" style="width: 180px;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in servicios %}
+                <tr>
+                    <td><strong>#{{ s.id }}</strong></td>
+                    <td><strong>{{ s.origen.nombre }}</strong> ➔ <strong>{{ s.destino.nombre }}</strong></td>
+                    <td><span class="badge bg-light text-dark border">{{ s.bus.patente }}</span></td>
+                    <td>{{ s.fecha_salida|date:"d/m/Y H:i" }} hrs</td>
+                    <td><span class="badge bg-success-subtle text-success fs-6 border border-success-subtle">${{ s.precio_base }}</span></td>
+                    <td class="text-center">
+                        <!-- Botón Modal Editar Servicio -->
+                        <button type="button" class="btn btn-outline-primary btn-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditarServicio{{ s.id }}">
+                            <i class="bi bi-pencil-square"></i>
+                        </button>
+                        <!-- Formulario Eliminar Servicio -->
+                        <form method="POST" class="d-inline" onsubmit="return confirm('¿Seguro que deseas eliminar este recorrido (#{{ s.id }})?');">
+                            {% csrf_token %}
+                            <input type="hidden" name="accion" value="eliminar_servicio">
+                            <input type="hidden" name="servicio_id" value="{{ s.id }}">
+                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar Recorrido">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+
+                <!-- MODAL EDITAR SERVICIO -->
+                <div class="modal fade" id="modalEditarServicio{{ s.id }}" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content rounded-4 shadow">
+                            <div class="modal-header bg-primary text-white">
+                                <h5 class="modal-title fw-bold">Editar Recorrido #{{ s.id }}</h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
+                            <form method="POST">
+                                {% csrf_token %}
+                                <div class="modal-body p-4 text-start">
+                                    <input type="hidden" name="accion" value="editar_servicio">
+                                    <input type="hidden" name="servicio_id" value="{{ s.id }}">
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-bold">Origen</label>
+                                        <select name="origen" class="form-select" required>
+                                            {% for c in ciudades %}
+                                                <option value="{{ c.id }}" {% if c.id == s.origen.id %}selected{% endif %}>{{ c.nombre }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-bold">Destino</label>
+                                        <select name="destino" class="form-select" required>
+                                            {% for c in ciudades %}
+                                                <option value="{{ c.id }}" {% if c.id == s.destino.id %}selected{% endif %}>{{ c.nombre }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-bold">Bus Asignado</label>
+                                        <select name="bus" class="form-select" required>
+                                            {% for b in buses %}
+                                                <option value="{{ b.id }}" {% if b.id == s.bus.id %}selected{% endif %}>{{ b.patente }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-bold">Fecha y Hora de Salida</label>
+                                        <!-- min={{ ahora_html }} bloquea fechas anteriores en el calendario -->
+                                        <input type="datetime-local" name="fecha_salida" value="{{ s.fecha_salida_html }}" min="{{ ahora_html }}" class="form-control" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-bold">Tarifa Base ($)</label>
+                                        <input type="number" name="precio_base" value="{{ s.precio_base }}" class="form-control" required>
+                                    </div>
+                                </div>
+                                <div class="modal-footer bg-light">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                    <button type="submit" class="btn btn-primary fw-semibold">Guardar Cambios</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center py-4 text-muted">No hay servicios programados en el sistema.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- SECCIÓN 2: TABLAS COMPONENTES (CIUDADES Y BUSES) -->
+<div class="row g-4">
+    <!-- Tabla de Ciudades -->
+    <div class="col-lg-6">
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-header bg-dark text-white fw-bold py-3 rounded-top-4 d-flex justify-content-between align-items-center">
+                <span>🏙️ Ciudades Registradas</span>
+                <span class="badge bg-light text-dark">{{ ciudades.count }}</span>
+            </div>
+            <div class="table-responsive" style="max-height: 380px;">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Ciudad / Terminal</th>
+                            <th class="text-center" style="width: 140px;">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in ciudades %}
+                        <tr>
+                            <td class="fw-semibold">{{ c.nombre }}</td>
+                            <td class="text-center">
+                                <!-- Botón Modal Editar Ciudad -->
+                                <button type="button" class="btn btn-outline-primary btn-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditarCiudad{{ c.id }}">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <!-- Formulario Eliminar Ciudad -->
+                                <form method="POST" class="d-inline" onsubmit="return confirm('¿Seguro de eliminar la ciudad {{ c.nombre }}?');">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="accion" value="eliminar_ciudad">
+                                    <input type="hidden" name="ciudad_id" value="{{ c.id }}">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+
+                        <!-- MODAL EDITAR CIUDAD -->
+                        <div class="modal fade" id="modalEditarCiudad{{ c.id }}" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog modal-sm">
+                                <div class="modal-content rounded-4 shadow">
+                                    <div class="modal-header bg-primary text-white">
+                                        <h6 class="modal-title fw-bold">Editar Ciudad</h6>
+                                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <form method="POST">
+                                        {% csrf_token %}
+                                        <div class="modal-body p-3 text-start">
+                                            <input type="hidden" name="accion" value="editar_ciudad">
+                                            <input type="hidden" name="ciudad_id" value="{{ c.id }}">
+                                            <label class="form-label small fw-bold">Nombre</label>
+                                            <input type="text" name="nombre_ciudad" value="{{ c.nombre }}" class="form-control" required>
+                                        </div>
+                                        <div class="modal-footer bg-light py-2">
+                                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                                            <button type="submit" class="btn btn-primary btn-sm fw-semibold">Guardar</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% empty %}
+                        <tr>
+                            <td colspan="2" class="text-center py-3 text-muted">No hay ciudades registradas.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabla de Buses -->
+    <div class="col-lg-6">
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-header bg-dark text-white fw-bold py-3 rounded-top-4 d-flex justify-content-between align-items-center">
+                <span>🚌 Flota de Buses</span>
+                <span class="badge bg-light text-dark">{{ buses.count }}</span>
+            </div>
+            <div class="table-responsive" style="max-height: 380px;">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Patente</th>
+                            <th>Asientos</th>
+                            <th class="text-center" style="width: 140px;">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for b in buses %}
+                        <tr>
+                            <td><span class="badge bg-secondary fs-6">{{ b.patente }}</span></td>
+                            <td><span class="badge bg-info text-dark">{{ b.asientos.count }} cupos</span></td>
+                            <td class="text-center">
+                                <!-- Botón Modal Editar Bus -->
+                                <button type="button" class="btn btn-outline-primary btn-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditarBus{{ b.id }}">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <!-- Formulario Eliminar Bus -->
+                                <form method="POST" class="d-inline" onsubmit="return confirm('¿Seguro de eliminar el bus {{ b.patente }}?');">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="accion" value="eliminar_bus">
+                                    <input type="hidden" name="bus_id" value="{{ b.id }}">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+
+                        <!-- MODAL EDITAR BUS -->
+                        <div class="modal fade" id="modalEditarBus{{ b.id }}" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog modal-sm">
+                                <div class="modal-content rounded-4 shadow">
+                                    <div class="modal-header bg-primary text-white">
+                                        <h6 class="modal-title fw-bold">Editar Patente Bus</h6>
+                                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <form method="POST">
+                                        {% csrf_token %}
+                                        <div class="modal-body p-3 text-start">
+                                            <input type="hidden" name="accion" value="editar_bus">
+                                            <input type="hidden" name="bus_id" value="{{ b.id }}">
+                                            <label class="form-label small fw-bold">Patente</label>
+                                            <input type="text" name="patente" value="{{ b.patente }}" class="form-control text-uppercase" required>
+                                        </div>
+                                        <div class="modal-footer bg-light py-2">
+                                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                                            <button type="submit" class="btn btn-primary btn-sm fw-semibold">Guardar</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% empty %}
+                        <tr>
+                            <td colspan="3" class="text-center py-3 text-muted">No hay buses registrados.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

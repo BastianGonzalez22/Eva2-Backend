@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Transportes Express - Sistema de Pasajes{% endblock %}</title>
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 CSS & Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        :root {
+            --primary-navy: #0f172a;
+            --primary-accent: #2563eb;
+            --surface-bg: #f8fafc;
+            --card-border: #e2e8f0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--surface-bg);
+            color: #334155;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Navbar Corporativo */
+        .navbar-custom {
+            background-color: var(--primary-navy);
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+            padding: 0.85rem 1rem;
+        }
+        .navbar-custom .navbar-brand {
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: #ffffff !important;
+        }
+        .navbar-custom .nav-link {
+            color: #cbd5e1 !important;
+            font-weight: 500;
+            transition: color 0.15s ease-in-out;
+        }
+        .navbar-custom .nav-link:hover {
+            color: #ffffff !important;
+        }
+
+        /* Tarjetas con sombras suaves */
+        .card {
+            border: 1px solid var(--card-border) !important;
+            border-radius: 12px !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -2px rgba(0, 0, 0, 0.03);
+            background-color: #ffffff;
+        }
+        .card-header {
+            border-top-left-radius: 12px !important;
+            border-top-right-radius: 12px !important;
+            border-bottom: 1px solid var(--card-border);
+            background-color: #ffffff;
+            font-weight: 600;
+        }
+
+        /* Asientos del Bus con microinteracciones */
+        .btn-check + label.btn {
+            border-radius: 10px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+        .btn-check + label.btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+        }
+        .btn-check:checked + label.btn {
+            transform: scale(0.98);
+            border-width: 2px !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25) !important;
+        }
+
+        /* Botón de Asiento Ocupado */
+        .btn-danger.disabled, .btn-danger:disabled {
+            background-color: #fee2e2 !important;
+            border-color: #fca5a5 !important;
+            color: #991b1b !important;
+            opacity: 1 !important;
+            border-radius: 10px;
+        }
+
+        /* Botones primarios */
+        .btn-primary {
+            background-color: var(--primary-accent);
+            border-color: var(--primary-accent);
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        .btn-primary:hover {
+            background-color: #1d4ed8;
+            border-color: #1d4ed8;
+        }
+        .btn-success {
+            background-color: #059669;
+            border-color: #059669;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        .btn-success:hover {
+            background-color: #047857;
+            border-color: #047857;
+        }
+
+        /* Footer Académico */
+        footer {
+            margin-top: auto;
+            background-color: #ffffff;
+            border-top: 1px solid var(--card-border);
+            padding: 1.1rem 0;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Barra de Navegación -->
+    <nav class="navbar navbar-expand-lg navbar-custom">
+        <div class="container">
+            <a class="navbar-brand d-flex align-items-center" href="{% url 'home' %}">
+                <i class="bi bi-bus-front-fill me-2 fs-4 text-white"></i> 
+                <span>Transportes Express</span>
+            </a>
+            
+            <button class="navbar-toggler border-0 text-white" type="button" data-bs-toggle="collapse" data-bs-target="#navContent">
+                <i class="bi bi-list fs-2 text-white"></i>
+            </button>
+
+            <div class="collapse navbar-collapse" id="navContent">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0 ms-lg-3">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'home' %}"><i class="bi bi-search me-1"></i> Buscar Pasajes</a>
+                    </li>
+                    <!-- Visible ÚNICAMENTE para Administrador / Staff -->
+                    {% if user.is_authenticated and user.is_staff or user.is_authenticated and user.perfil.rol == 'ADMIN_FLOTA' %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="/api/docs/" target="_blank"><i class="bi bi-code-square me-1"></i> API Swagger</a>
+                        </li>
+                    {% endif %}
+                </ul>
+
+                <div class="d-flex align-items-center gap-2">
+                    {% if user.is_authenticated %}
+                        <a href="{% url 'ver_carro' %}" class="btn btn-outline-light btn-sm position-relative px-3 py-1">
+                            <i class="bi bi-cart3"></i> Mi Carro
+                        </a>
+                        
+                        {% if user.is_staff or user.perfil.rol == 'ADMIN_FLOTA' %}
+                            <a href="{% url 'gestion_servicios' %}" class="btn btn-warning btn-sm fw-bold px-3 py-1">
+                                <i class="bi bi-gear-fill"></i> Panel Flota
+                            </a>
+                        {% endif %}
+
+                        <span class="text-light small ms-2"><i class="bi bi-person-circle"></i> {{ user.username }}</span>
+                        <a href="{% url 'logout' %}" class="btn btn-danger btn-sm px-2 py-1 ms-1" title="Cerrar Sesión">
+                            <i class="bi bi-box-arrow-right"></i>
+                        </a>
+                    {% else %}
+                        <a href="{% url 'login' %}" class="btn btn-outline-light btn-sm px-3">Iniciar Sesión</a>
+                        <a href="{% url 'registro' %}" class="btn btn-primary btn-sm px-3">Registrarse</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Alertas y Mensajes del Sistema -->
+    <div class="container mt-3">
+        {% if messages %}
+            {% for msg in messages %}
+                <div class="alert alert-{{ msg.tags|default:'info' }} alert-dismissible fade show border-0 shadow-sm" role="alert">
+                    {{ msg }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    </div>
+
+    <!-- Contenido Principal -->
+    <main class="container py-4">
+        {% block content %}
+        {% endblock %}
+    </main>
+
+    <!-- Footer Académico Personalizado con Rúbrica -->
+    <footer>
+        <div class="container text-center">
+            <div class="fw-semibold text-dark" style="font-size: 0.85rem;">Bastián González</div>
+            <div class="text-secondary mt-1" style="font-size: 0.78rem;">
+                Carrera: <strong>Analista Programador</strong> &bull; Sección: <strong>N3-C2</strong> &bull; Año 2026
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

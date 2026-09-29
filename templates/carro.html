@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+{% block title %}Mi Carro de Pasajes{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="fw-bold mb-0">🛒 Mi Carro de Pasajes</h3>
+</div>
+
+{% if items_detalle %}
+<div class="row">
+    <div class="col-lg-8 mb-4">
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Recorrido</th>
+                            <th>Asiento</th>
+                            <th>Categoría</th>
+                            <th>Pasajero (RUT)</th>
+                            <th>Precio</th>
+                            <th class="text-center">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for fila in items_detalle %}
+                        <tr>
+                            <td>
+                                <strong>{{ fila.item.servicio.origen.nombre }}</strong> ➔ <strong>{{ fila.item.servicio.destino.nombre }}</strong>
+                                <br><small class="text-muted">{{ fila.item.servicio.fecha_salida|date:"d/m/Y H:i" }} hrs</small>
+                            </td>
+                            <td><span class="badge bg-dark fs-6">#{{ fila.item.asiento.numero }}</span></td>
+                            <td>
+                                <span class="badge {% if fila.item.asiento.tipo == 'SALON_CAMA' %}bg-primary{% else %}bg-info text-dark{% endif %}">
+                                    {{ fila.item.asiento.get_tipo_display }}
+                                </span>
+                            </td>
+                            <td>
+                                <div>{{ fila.item.nombre_ocupante }}</div>
+                                <small class="text-muted font-monospace">{{ fila.item.rut_ocupante }}</small>
+                            </td>
+                            <td><strong class="text-success fs-6">${{ fila.precio }}</strong></td>
+                            <td class="text-center">
+                                <a href="{% url 'eliminar_item_carro' fila.item.id %}" class="btn btn-outline-danger btn-sm">
+                                    Quitar
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card shadow-sm border-0 p-4 rounded-4">
+            <h5 class="fw-bold mb-3">Resumen de la Transacción</h5>
+            <hr>
+            <div class="d-flex justify-content-between mb-4">
+                <span class="fs-5 text-muted">Total a Pagar:</span>
+                <span class="fs-3 fw-bold text-success">${{ total }}</span>
+            </div>
+            
+            <form method="POST" action="{% url 'procesar_checkout' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow-sm">
+                    💳 Confirmar y Pagar
+                </button>
+            </form>
+            <small class="text-muted text-center d-block mt-3">
+                Reserva segura y emisión inmediata de boletos.
+            </small>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card shadow-sm border-0 p-5 text-center rounded-4">
+    <h4 class="fw-bold text-secondary">Tu carro de compras está vacío</h4>
+    <p class="text-muted">Explora los itinerarios disponibles y selecciona tu asiento.</p>
+    <a href="{% url 'home' %}" class="btn btn-primary btn-lg mt-2 mx-auto" style="max-width: 250px;">
+        Buscar Recorridos
+    </a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block title %}Buscar Pasajes - Transportes Express{% endblock %}
+
+{% block content %}
+<!-- Banner Hero con Imagen Real de Autobús de Pasajeros -->
+<div class="position-relative rounded-4 overflow-hidden mb-5 shadow-sm" style="
+    background: linear-gradient(rgba(15, 23, 42, 0.65), rgba(15, 23, 42, 0.78)), 
+                url('https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1600&q=80') center/cover no-repeat;
+    padding: 4.5rem 2rem;
+">
+    <div class="row justify-content-center text-center text-white">
+        <div class="col-lg-8">
+            <span class="badge bg-primary bg-opacity-75 text-uppercase px-3 py-2 mb-3 fw-semibold">
+                <i class="bi bi-geo-alt-fill me-1"></i> Conectando Rutas de Chile
+            </span>
+            <h1 class="display-5 fw-bold mb-3">Encuentra y Reserva tu Próximo Viaje</h1>
+            <p class="lead mb-4 text-light opacity-90">
+                Selecciona tu origen, destino y viaja en asientos Semicama o Salón Cama al mejor precio.
+            </p>
+
+            <!-- Formulario Flotante de Búsqueda -->
+            <div class="card border-0 shadow-lg p-3 text-start bg-white text-dark rounded-4">
+                <form method="GET" class="row g-2 align-items-end">
+                    <div class="col-md-5">
+                        <label class="form-label small fw-bold text-muted mb-1">
+                            <i class="bi bi-pin-map-fill text-primary me-1"></i> Origen
+                        </label>
+                        <select name="origen" class="form-select border-0 bg-light py-2">
+                            <option value="">Todas las ciudades de origen</option>
+                            {% for c in ciudades %}
+                                <option value="{{ c.id }}" {% if c.id|stringformat:"s" == origen_sel %}selected{% endif %}>
+                                    {{ c.nombre }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-5">
+                        <label class="form-label small fw-bold text-muted mb-1">
+                            <i class="bi bi-cursor-fill text-danger me-1"></i> Destino
+                        </label>
+                        <select name="destino" class="form-select border-0 bg-light py-2">
+                            <option value="">Todas las ciudades de destino</option>
+                            {% for c in ciudades %}
+                                <option value="{{ c.id }}" {% if c.id|stringformat:"s" == destino_sel %}selected{% endif %}>
+                                    {{ c.nombre }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold d-flex align-items-center justify-content-center gap-2">
+                            <i class="bi bi-search"></i> Buscar
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Listado de Salidas Disponibles -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0 text-slate-800">
+        <i class="bi bi-calendar2-week me-2 text-primary"></i> Itinerarios y Salidas Programadas
+    </h4>
+    <span class="text-muted small">Actualizado en tiempo real</span>
+</div>
+
+<div class="row g-4">
+    {% for s in servicios %}
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden position-relative" style="transition: transform 0.2s ease;">
+                <div class="card-body p-4 d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                        <span class="badge bg-light text-dark border px-2 py-1">
+                            <i class="bi bi-bus-front text-muted me-1"></i> Bus {{ s.bus.patente }}
+                        </span>
+                        <div class="text-end">
+                            <small class="text-muted d-block" style="font-size: 0.75rem;">Desde</small>
+                            <span class="fs-5 fw-bold text-success">${{ s.precio_base }}</span>
+                        </div>
+                    </div>
+
+                    <h5 class="fw-bold mb-2 text-primary">
+                        {{ s.origen.nombre }} <span class="text-muted">➔</span> {{ s.destino.nombre }}
+                    </h5>
+
+                    <p class="text-muted small mb-4">
+                        <i class="bi bi-clock me-1 text-secondary"></i> Salida: 
+                        <strong>{{ s.fecha_salida|date:"d/m/Y - H:i" }} hrs</strong>
+                    </p>
+
+                    <div class="mt-auto pt-2 border-top d-flex justify-content-between align-items-center">
+                        <div class="small text-muted">
+                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1">Cama</span>
+                            <span class="badge bg-success-subtle text-success border border-success-subtle">Semi</span>
+                        </div>
+                        <a href="{% url 'detalle_servicio' s.id %}" class="btn btn-outline-primary btn-sm px-3 fw-semibold rounded-pill">
+                            Ver Asientos <i class="bi bi-arrow-right ms-1"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% empty %}
+        <div class="col-12">
+            <div class="card border-0 shadow-sm p-5 text-center rounded-4">
+                <i class="bi bi-ticket-perforated fs-1 text-muted mb-3"></i>
+                <h5 class="fw-bold text-secondary">No se encontraron recorridos para la búsqueda seleccionada</h5>
+                <p class="text-muted small mb-3">Intenta cambiando el filtro de ciudad de origen o destino.</p>
+                <div>
+                    <a href="{% url 'home' %}" class="btn btn-outline-primary btn-sm px-4">Ver Todos los Recorridos</a>
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}
