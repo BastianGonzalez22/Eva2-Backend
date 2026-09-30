@@ -1,6 +1,14 @@
 """
-Configuración de URLs principales de AndesSur.
+==============================================================================
+CONFIGURACIÓN DE ENRUTAMIENTO PRINCIPAL (core/urls.py)
+------------------------------------------------------------------------------
+Matriz de endpoints RESTful conforme a la pauta de evaluación:
+- Rutas públicas: catálogo, búsqueda con filtros, Swagger/OpenAPI.
+- Rutas de pasajero autenticado: carro de compras, checkout, pago y boletos.
+- Rutas de administrador: gestión de flota, CRUD de recorridos y estados de venta.
+==============================================================================
 """
+
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
@@ -9,7 +17,7 @@ from transporte import views, api_views
 
 urlpatterns = [
     # -------------------------------------------------------------------------
-    # VISTAS WEB
+    # 1. VISTAS WEB (FRONTEND SSR)
     # -------------------------------------------------------------------------
     path('', views.home, name='home'),
     path('login/', views.login_view, name='login'),
@@ -27,30 +35,46 @@ urlpatterns = [
     path('gestion/', views.gestion_servicios, name='gestion_servicios'),
 
     # -------------------------------------------------------------------------
-    # API REST
+    # 2. AUTENTICACIÓN JWT (RBAC)
     # -------------------------------------------------------------------------
     path('api/token/', api_views.CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
-    path('api/servicios/', api_views.BuscarServiciosAPI.as_view(), name='api_servicios'),
+    # -------------------------------------------------------------------------
+    # 3. ENDPOINTS DE RECORRIDOS (MATRIZ PAUTA)
+    # -------------------------------------------------------------------------
+    # Búsqueda pública con filtros (origen, destino, precio, fecha)
+    path('api/servicios/buscar/', api_views.BuscarServiciosAPI.as_view(), name='api_servicios_buscar'),
+    # Mapa de asientos por servicio
     path('api/servicios/<int:servicio_id>/asientos/', api_views.AsientosServicioAPI.as_view(), name='api_asientos_servicio'),
-    
+    # CRUD de Servicios para Admin de Flota (POST, GET, PUT, PATCH, DELETE)
+    path('api/servicios/', api_views.GestionServiciosAPI.as_view(), name='api_servicios_crud'),
+    path('api/servicios/<int:pk>/', api_views.GestionServiciosDetalleAPI.as_view(), name='api_servicios_crud_detalle'),
+
+    # -------------------------------------------------------------------------
+    # 4. CARRO DE COMPRAS, CHECKOUT Y TRANSICIÓN DE VENTAS (MATRIZ PAUTA)
+    # -------------------------------------------------------------------------
     path('api/carro-pasajes/', api_views.CarroPasajesAPI.as_view(), name='api_carro'),
-    path('api/carro-pasajes/checkout/', api_views.CheckoutAPI.as_view(), name='api_checkout'),
+    # Checkout oficial de la matriz
+    path('api/ventas/checkout/', api_views.CheckoutAPI.as_view(), name='api_ventas_checkout'),
+    # Alias de compatibilidad
+    path('api/carro-pasajes/checkout/', api_views.CheckoutAPI.as_view(), name='api_carro_checkout'),
+    
+    # Pagos y cancelaciones
     path('api/ventas/<int:pk>/pagar/', api_views.PagarVentaAPI.as_view(), name='api_pagar_venta'),
     path('api/ventas/<int:pk>/cancelar/', api_views.CancelarVentaAPI.as_view(), name='api_cancelar_venta'),
     path('api/ventas/<int:pk>/estado/', api_views.CambiarEstadoVentaAPI.as_view(), name='api_cambiar_estado'),
     
+    # Historial de pasajero
     path('api/mis-boletos/', api_views.MisBoletosAPI.as_view(), name='api_mis_boletos'),
-    path('api/gestion/servicios/', api_views.GestionServiciosAPI.as_view(), name='api_gestion_servicios'),
-    path('api/gestion/servicios/<int:pk>/', api_views.GestionServiciosDetalleAPI.as_view(), name='api_gestion_servicios_detalle'),
 
     # -------------------------------------------------------------------------
-    # DOCUMENTACIÓN SWAGGER / OPENAPI
+    # 5. DOCUMENTACIÓN OPENAPI 3.0 / SWAGGER
     # -------------------------------------------------------------------------
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
 
+# Manejador de error 404 personalizado
 handler404 = 'transporte.views.error_404_view'
