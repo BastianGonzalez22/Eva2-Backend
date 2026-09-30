@@ -3,12 +3,13 @@
 MÓDULO DE MODELOS DE DOMINIO Y PERSISTENCIA (transporte/models.py)
 ------------------------------------------------------------------------------
 Define las entidades estructurales para el sistema de venta de pasajes AndesSur:
-- Control de perfiles y roles de usuario (RBAC).
+- Control de perfiles y roles de usuario (RBAC) con campo usuario.
 - Infraestructura de transporte: Ciudades, Buses y Butacas configurables.
 - Itinerarios y programación de Recorridos (Servicios).
-- Carro de compras persistente por usuario y desglose de ítems.
-- Cabecera de Ventas con ciclo de vida de estados y Boletos emitidos.
-- Validadores de integridad nacional (RUT chileno mediante Módulo 11).
+- Carro de compras persistente con marcas de tiempo (agregado_en, actualizado_en).
+- Cabecera de Ventas con estados y Boletos emitidos con restricción de unicidad.
+- Protección referencial con on_delete=models.PROTECT en ventas y servicios.
+- Señal post_save para creación automática de perfiles.
 ==============================================================================
 """
 
@@ -39,7 +40,6 @@ def validar_rut_chileno(rut_str):
     if not cuerpo.isdigit():
         raise ValidationError('El cuerpo del RUT debe contener únicamente dígitos numéricos.')
 
-    # Algoritmo de ponderación Módulo 11
     suma = 0
     multiplicador = 2
     for c in reversed(cuerpo):
@@ -65,15 +65,14 @@ def validar_rut_chileno(rut_str):
 class PerfilUsuario(models.Model):
     """
     Extensión del modelo User de Django mediante relación OneToOne.
-    Almacena atributos de negocio adicionales, como el rol asignado dentro
-    del esquema de control de accesos basados en roles (RBAC).
+    Almacena el rol RBAC (ADMIN_FLOTA o PASAJERO) y datos de contacto complementarios.
     """
     ROLES = [
         ('ADMIN_FLOTA', 'Administrador de Flota'),
         ('PASAJERO', 'Pasajero Cliente'),
     ]
 
-    user = models.OneToOneField(
+    usuario = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
         related_name='perfil',
@@ -85,14 +84,19 @@ class PerfilUsuario(models.Model):
         default='PASAJERO',
         verbose_name='Rol en la Plataforma'
     )
+    telefono = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        verbose_name='Teléfono de Contacto'
+    )
 
     class Meta:
         verbose_name = 'Perfil de Usuario'
         verbose_name_plural = 'Perfiles de Usuario'
 
     def __str__(self):
-        """Representación textual del perfil del usuario."""
-        return f'{self.user.username} - {self.get_rol_display()}'
+        return f'{self.usuario.username} - {self.get_rol_display()}'
 
 
 # ==============================================================================
@@ -100,8 +104,7 @@ class PerfilUsuario(models.Model):
 # ==============================================================================
 class Ciudad(models.Model):
     """
-    Representa una localidad geográfica o terminal que actúa como origen
-    o destino dentro de los itinerarios de transporte interurbano.
+    Representa una localidad o terminal de buses origen o destino.
     """
     nombre = models.CharField(
         max_length=100,
@@ -115,7 +118,6 @@ class Ciudad(models.Model):
         ordering = ['nombre']
 
     def __str__(self):
-        """Retorna el nombre descriptivo de la ciudad."""
         return self.nombre
 
 
@@ -124,8 +126,7 @@ class Ciudad(models.Model):
 # ==============================================================================
 class Bus(models.Model):
     """
-    Representa una unidad física de transporte (vehículo) identificada
-    por su patente única. Contiene la colección de butacas disponibles.
+    Unidad de transporte vehicular identificada por su placa patente.
     """
     patente = models.CharField(
         max_length=10,
@@ -138,7 +139,6 @@ class Bus(models.Model):
         verbose_name_plural = 'Buses'
 
     def __str__(self):
-        """Retorna la patente vehicular asociada al bus."""
         return f'Bus [{self.patente}]'
 
 
@@ -147,9 +147,7 @@ class Bus(models.Model):
 # ==============================================================================
 class Asiento(models.Model):
     """
-    Representa una butaca numerada perteneciente a un bus en particular.
-    Define la categoría de confort (SEMICAMA o SALON_CAMA), la cual influye
-    directamente en el cálculo final de la tarifa del pasaje.
+    Butaca física dentro de un bus. Aplica recargo de 20% si es SALON_CAMA.
     """
     TIPOS = [
         ('SEMICAMA', 'Semicama'),
@@ -179,14 +177,10 @@ class Asiento(models.Model):
         ordering = ['numero']
 
     def __str__(self):
-        """Retorna el número de asiento, bus y su clasificación."""
         return f'Asiento {self.numero} ({self.get_tipo_display()}) - Bus {self.bus.patente}'
 
     def calcular_precio(self, precio_base):
-        """
-        Calcula el valor del asiento en base a su categoría.
-        Aplica un recargo del 20% sobre el precio base si la butaca es SALON_CAMA.
-        """
+        """Calcula el valor según la categoría del asiento."""
         if self.tipo == 'SALON_CAMA':
             return int(precio_base * 1.20)
         return int(precio_base)
@@ -197,24 +191,23 @@ class Asiento(models.Model):
 # ==============================================================================
 class Servicio(models.Model):
     """
-    Define un recorrido programado en una fecha y horario específicos,
-    asociando una ciudad de origen, una ciudad de destino y un bus asignado.
+    Recorrido programado entre dos ciudades con bus y tarifa base asignada.
     """
     origen = models.ForeignKey(
         Ciudad,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='servicios_origen',
         verbose_name='Ciudad de Origen'
     )
     destino = models.ForeignKey(
         Ciudad,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='servicios_destino',
         verbose_name='Ciudad de Destino'
     )
     bus = models.ForeignKey(
         Bus,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='servicios',
         verbose_name='Bus Asignado'
     )
@@ -231,7 +224,6 @@ class Servicio(models.Model):
         ordering = ['fecha_salida']
 
     def __str__(self):
-        """Representación textual del recorrido, itinerario y horario."""
         return f'{self.origen.nombre} -> {self.destino.nombre} ({self.fecha_salida.strftime("%d/%m/%Y %H:%M")})'
 
 
@@ -240,8 +232,7 @@ class Servicio(models.Model):
 # ==============================================================================
 class CarroPasajes(models.Model):
     """
-    Entidad persistente vinculada de manera unívoca a un usuario.
-    Alberga de forma temporal la selección de pasajes antes de proceder al checkout.
+    Carro de compras persistente vinculado al usuario.
     """
     usuario = models.OneToOneField(
         User,
@@ -253,13 +244,16 @@ class CarroPasajes(models.Model):
         auto_now_add=True,
         verbose_name='Fecha de Creación'
     )
+    actualizado_en = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Última Actualización'
+    )
 
     class Meta:
         verbose_name = 'Carro de Pasajes'
         verbose_name_plural = 'Carros de Pasajes'
 
     def __str__(self):
-        """Muestra el usuario propietario del carro de compras."""
         return f'Carro de {self.usuario.username}'
 
 
@@ -268,9 +262,7 @@ class CarroPasajes(models.Model):
 # ==============================================================================
 class ItemCarro(models.Model):
     """
-    Representa un pasaje individual agregado al carro de compras.
-    Contiene la referencia al servicio, butaca y los datos personales
-    del pasajero (nombre y RUT verificado) antes de la emisión definitiva.
+    Pasaje temporal dentro del carro de compras.
     """
     carro = models.ForeignKey(
         CarroPasajes,
@@ -297,6 +289,10 @@ class ItemCarro(models.Model):
         max_length=12,
         verbose_name='RUT del Ocupante'
     )
+    agregado_en = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha de Inclusión'
+    )
 
     class Meta:
         verbose_name = 'Ítem de Carro'
@@ -304,28 +300,20 @@ class ItemCarro(models.Model):
         unique_together = ('carro', 'servicio', 'asiento')
 
     def __str__(self):
-        """Retorna descripción resumida del pasaje en carro."""
         return f'Asiento {self.asiento.numero} para {self.nombre_ocupante}'
 
     def obtener_subtotal(self):
-        """
-        Calcula el valor unitario de este ítem considerando la tarifa base
-        del servicio y el tipo de butaca (Semicama o Salón Cama).
-        """
+        """Retorna subtotal según tarifa base y butaca."""
         return self.asiento.calcular_precio(self.servicio.precio_base)
 
 
 # ==============================================================================
-# MODELO: CABECERA DE VENTAS / ÓRDENES DE COMPRA
+# MODELO: CABECERA DE VENTAS
 # ==============================================================================
 class Venta(models.Model):
     """
-    Cabecera transaccional de compras realizadas en la plataforma.
-    Gestiona el ciclo de vida de la transacción mediante sus estados:
-    - PENDIENTE: Orden generada en espera de confirmación de pago.
-    - PAGADO: Transacción pagada con asientos reservados atómicamente.
-    - ENTREGADO: Boletos emitidos y validados para el viaje.
-    - CANCELADO: Orden anulada liberando butacas al inventario general.
+    Cabecera transaccional con ciclo de vida:
+    PENDIENTE -> PAGADO -> ENTREGADO / CANCELADO.
     """
     ESTADOS = [
         ('PENDIENTE', 'Pendiente'),
@@ -336,7 +324,7 @@ class Venta(models.Model):
 
     usuario = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='ventas',
         verbose_name='Cliente Comprador'
     )
@@ -360,7 +348,6 @@ class Venta(models.Model):
         ordering = ['-fecha_venta']
 
     def __str__(self):
-        """Retorna identificador, estado y total pagado de la venta."""
         return f'Venta #{self.id} - {self.usuario.username} [{self.get_estado_display()}]'
 
 
@@ -369,9 +356,7 @@ class Venta(models.Model):
 # ==============================================================================
 class Boleto(models.Model):
     """
-    Representa el título de transporte individual emitido tras una compra.
-    Asocia un asiento físico irrevocable con los datos del pasajero,
-    vinculado a su cabecera de Venta correspondiente.
+    Título de transporte individual emitido asociado a una venta.
     """
     venta = models.ForeignKey(
         Venta,
@@ -381,13 +366,13 @@ class Boleto(models.Model):
     )
     servicio = models.ForeignKey(
         Servicio,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='boletos_emitidos',
         verbose_name='Servicio de Transporte'
     )
     asiento = models.ForeignKey(
         Asiento,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         verbose_name='Asiento Asignado'
     )
     nombre_pasajero = models.CharField(
@@ -405,9 +390,9 @@ class Boleto(models.Model):
     class Meta:
         verbose_name = 'Boleto'
         verbose_name_plural = 'Boletos'
+        unique_together = ('servicio', 'asiento', 'venta')
 
     def __str__(self):
-        """Retorna código de boleto, pasajero y butaca asignada."""
         return f'Boleto #{self.id} - Asiento {self.asiento.numero} ({self.nombre_pasajero})'
 
 
@@ -417,8 +402,7 @@ class Boleto(models.Model):
 @receiver(post_save, sender=User)
 def crear_perfil_usuario_automatico(sender, instance, created, **kwargs):
     """
-    Señal post_save que crea automáticamente una instancia de PerfilUsuario
-    con rol PASAJERO cada vez que se registra un nuevo usuario en Django.
+    Crea automáticamente PerfilUsuario con rol PASAJERO al registrar un usuario.
     """
     if created:
-        PerfilUsuario.objects.get_or_create(user=instance)
+        PerfilUsuario.objects.get_or_create(usuario=instance)
