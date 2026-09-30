@@ -1,23 +1,91 @@
 {% extends 'base.html' %}
-{% block title %}Comprobante de Compra{% endblock %}
+
 {% block content %}
-<div class="card shadow border-0 max-w-lg mx-auto" style="max-width: 600px;">
-    <div class="card-header bg-success text-white text-center py-3">
-        <h4 class="mb-0 fw-bold">✓ Compra Exitosa</h4>
-        <small>Boleto #{{ boleto.id }}</small>
-    </div>
-    <div class="card-body p-4">
-        <ul class="list-group list-group-flush mb-3">
-            <li class="list-group-item d-flex justify-content-between"><span>Pasajero:</span> <strong>{{ boleto.nombre_pasajero }}</strong></li>
-            <li class="list-group-item d-flex justify-content-between"><span>RUT:</span> <strong>{{ boleto.rut_pasajero }}</strong></li>
-            <li class="list-group-item d-flex justify-content-between"><span>Origen ➔ Destino:</span> <strong>{{ boleto.servicio.origen.nombre }} ➔ {{ boleto.servicio.destino.nombre }}</strong></li>
-            <li class="list-group-item d-flex justify-content-between"><span>Fecha Salida:</span> <strong>{{ boleto.servicio.fecha_salida|date:"d/m/Y H:i" }}</strong></li>
-            <li class="list-group-item d-flex justify-content-between"><span>Asiento:</span> <strong class="badge bg-primary fs-6">#{{ boleto.asiento.numero }}</strong></li>
-            <li class="list-group-item d-flex justify-content-between"><span>Total Pagado:</span> <strong class="text-success fs-5">${{ boleto.precio_pagado }}</strong></li>
-        </ul>
-        <div class="text-center">
-            <a href="{% url 'home' %}" class="btn btn-outline-dark">Volver al Inicio</a>
+<div class="row justify-content-center">
+  <div class="col-md-8">
+    <div class="card shadow-sm border-0">
+      <div class="card-header {% if boleto.venta.estado == 'PAGADO' %}bg-success{% elif boleto.venta.estado == 'PENDIENTE' %}bg-warning text-dark{% else %}bg-secondary{% endif %} text-white py-3">
+        <h4 class="mb-0 text-center">
+          {% if boleto.venta.estado == 'PAGADO' %}
+            <i class="bi bi-check-circle-fill"></i> ¡Compra Confirmada y Pagada!
+          {% elif boleto.venta.estado == 'PENDIENTE' %}
+            <i class="bi bi-clock-history"></i> Orden de Compra Pendiente de Pago
+          {% elif boleto.venta.estado == 'CANCELADO' %}
+            <i class="bi bi-x-circle-fill"></i> Orden Cancelada
+          {% else %}
+            Boleto de Pasaje
+          {% endif %}
+        </h4>
+      </div>
+      <div class="card-body p-4">
+        
+        <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
+          <div>
+            <h5 class="mb-0 text-primary">Boleto Electrónico #{{ boleto.id }}</h5>
+            <small class="text-muted">Orden de Venta: #{{ boleto.venta.id }}</small>
+          </div>
+          <div>
+            <span class="badge {% if boleto.venta.estado == 'PAGADO' %}bg-success{% elif boleto.venta.estado == 'PENDIENTE' %}bg-warning text-dark{% else %}bg-danger{% endif %} fs-6">
+              {{ boleto.venta.estado }}
+            </span>
+          </div>
         </div>
+
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <p class="mb-1 text-muted"><strong>Origen:</strong></p>
+            <p class="fs-5">{{ boleto.servicio.origen.nombre }}</p>
+          </div>
+          <div class="col-md-6">
+            <p class="mb-1 text-muted"><strong>Destino:</strong></p>
+            <p class="fs-5">{{ boleto.servicio.destino.nombre }}</p>
+          </div>
+          <div class="col-md-6">
+            <p class="mb-1 text-muted"><strong>Fecha y Hora de Salida:</strong></p>
+            <p>{{ boleto.servicio.fecha_salida|date:"d/m/Y H:i" }} hrs</p>
+          </div>
+          <div class="col-md-6">
+            <p class="mb-1 text-muted"><strong>Bus / Patente:</strong></p>
+            <p>{{ boleto.servicio.bus.patente }}</p>
+          </div>
+          <div class="col-md-6">
+            <p class="mb-1 text-muted"><strong>Asiento Asignado:</strong></p>
+            <p><span class="badge bg-primary fs-6">Asiento #{{ boleto.asiento.numero }} ({{ boleto.asiento.get_tipo_display }})</span></p>
+          </div>
+          <div class="col-md-6">
+            <p class="mb-1 text-muted"><strong>Pasajero:</strong></p>
+            <p>{{ boleto.nombre_pasajero }} (RUT: {{ boleto.rut_pasajero }})</p>
+          </div>
+          <div class="col-12">
+            <p class="mb-1 text-muted"><strong>Total Pagado:</strong></p>
+            <h4 class="text-success">${{ boleto.precio_pagado }} CLP</h4>
+          </div>
+        </div>
+
+        <!-- ACCIONES SEGÚN ESTADO DE LA VENTA -->
+        <div class="text-center mt-4 pt-3 border-top">
+          {% if boleto.venta.estado == 'PENDIENTE' %}
+            <div class="alert alert-info">
+              Esta orden está reservada a la espera de tu pago. Para emitir definitivamente tu boleto, pulsa <strong>Confirmar y Pagar</strong>.
+            </div>
+            <a href="{% url 'pagar_orden_web' boleto.venta.id %}" class="btn btn-success btn-lg px-4 me-2">
+              <i class="bi bi-credit-card"></i> Confirmar y Pagar Ahora
+            </a>
+            <a href="{% url 'cancelar_orden_web' boleto.venta.id %}" class="btn btn-outline-danger btn-lg px-4" onclick="return confirm('¿Seguro que deseas cancelar esta orden?');">
+              Cancelar Orden
+            </a>
+          {% elif boleto.venta.estado == 'PAGADO' %}
+            <a href="{% url 'cancelar_orden_web' boleto.venta.id %}" class="btn btn-outline-danger me-2" onclick="return confirm('¿Deseas cancelar tu pasaje? El asiento quedará liberado.');">
+              Anular / Cancelar Pasaje
+            </a>
+            <a href="{% url 'home' %}" class="btn btn-primary">Volver al Inicio</a>
+          {% else %}
+            <a href="{% url 'home' %}" class="btn btn-primary">Volver al Inicio</a>
+          {% endif %}
+        </div>
+
+      </div>
     </div>
+  </div>
 </div>
 {% endblock %}

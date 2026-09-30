@@ -2,11 +2,9 @@
 ==============================================================================
 MÓDULO DE VISTAS DE API REST (transporte/api_views.py)
 ------------------------------------------------------------------------------
-Implementa endpoints RESTful bajo arquitectura DRF, autenticación JWT con 
-claims personalizados de control de acceso RBAC, transacciones atómicas con 
-bloqueo pesimista a nivel de fila (select_for_update) sobre la entidad Asiento 
-para garantizar concurrencia libre de condiciones de carrera, y filtros 
-avanzados vía DjangoFilterBackend.
+Endpoints RESTful con DRF, JWT con claims de rol RBAC, ciclo de vida de venta:
+PENDIENTE -> PAGADO -> ENTREGADO / CANCELADO, concurrencia con select_for_update 
+en Asiento al momento de pagar, y filtros avanzados con django-filter.
 ==============================================================================
 """
 
@@ -32,10 +30,7 @@ from .serializers import (
 # AUTENTICACIÓN JWT CON CLAIM PERSONALIZADO DE ROL
 # ==============================================================================
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """
-    Serializador JWT que inyecta en el payload decodificable del token de acceso
-    el claim personalizado 'rol' ('PASAJERO' o 'ADMIN_FLOTA') para control RBAC.
-    """
+    """Agrega claim de rol personalizado al payload JWT."""
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
@@ -49,34 +44,27 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
 class CustomTokenObtainPairView(TokenObtainPairView):
-    """
-    Vista de autenticación que expone el endpoint /api/token/ emitiendo tokens
-    con la estructura de claims extendida para la arquitectura del sistema.
-    """
+    """Endpoint /api/token/."""
     serializer_class = CustomTokenObtainPairSerializer
 
 # ==============================================================================
 # PERMISOS RBAC
 # ==============================================================================
 class EsAdminFlota(permissions.BasePermission):
-    """
-    Clase de autorización RBAC que restringe el acceso exclusivamente a usuarios
-    con credenciales de staff o perfil verificado como ADMIN_FLOTA.
-    """
+    """Permiso exclusivo para administradores de flota."""
     def has_permission(self, request, view):
         return request.user.is_authenticated and (
             request.user.is_staff or 
-            (hasattr(request.user, 'perfil') and request.user.perfil.rol == 'ADMIN_FLOTA')
+            (hasattr(request.user, 'perfil') and user_rol_admin(request.user))
         )
 
+def user_rol_admin(user):
+    return hasattr(user, 'perfil') and user.perfil.rol == 'ADMIN_FLOTA'
+
 # ==============================================================================
-# FILTRO AVANZADO DE SERVICIOS
+# FILTROS Y CONSULTA DE SERVICIOS
 # ==============================================================================
 class ServicioFilter(django_filters.FilterSet):
-    """
-    Filtro avanzado para itinerarios: soporta origen, destino, rango de fechas
-    y rango de precios mínimos y máximos mediante django-filter.
-    """
     precio_min = django_filters.NumberFilter(field_name='precio_base', lookup_expr='gte')
     precio_max = django_filters.NumberFilter(field_name='precio_base', lookup_expr='lte')
     fecha_desde = django_filters.DateTimeFilter(field_name='fecha_salida', lookup_expr='gte')
@@ -85,14 +73,8 @@ class ServicioFilter(django_filters.FilterSet):
         model = Servicio
         fields = ['origen', 'destino', 'precio_min', 'precio_max', 'fecha_desde']
 
-# ==============================================================================
-# ENDPOINTS PÚBLICOS DE CONSULTA Y BÚSQUEDA
-# ==============================================================================
 class BuscarServiciosAPI(generics.ListAPIView):
-    """
-    Consulta pública de recorridos disponibles con filtrado multidimensional
-    por origen, destino, rango de precios y fecha de salida.
-    """
+    """Consulta de recorridos con filtros por origen, destino, precio y fecha."""
     queryset = Servicio.objects.all().order_by('fecha_salida')
     serializer_class = ServicioSerializer
     filter_backends = [DjangoFilterBackend]
@@ -101,10 +83,7 @@ class BuscarServiciosAPI(generics.ListAPIView):
 ServiciosListAPI = BuscarServiciosAPI
 
 class AsientosServicioAPI(APIView):
-    """
-    Inspección del mapa de asientos de un recorrido. Calcula el precio según la
-    categoría del asiento e informa disponibilidad en tiempo real.
-    """
+    """Mapa de asientos con estado de disponibilidad en tiempo real."""
     @extend_schema(responses={200: AsientoSerializer(many=True)})
     def get(self, request, servicio_id):
         servicio = get_object_or_404(Servicio, id=servicio_id)
@@ -127,13 +106,10 @@ class AsientosServicioAPI(APIView):
         return Response(data)
 
 # ==============================================================================
-# HISTORIAL DE BOLETOS DEL PASAJERO
+# HISTORIAL DE COMPRAS
 # ==============================================================================
 class MisBoletosAPI(generics.ListAPIView):
-    """
-    Retorna el historial de compras y boletos emitidos pertenecientes al
-    usuario autenticado con sesión JWT activa.
-    """
+    """Historial de boletos pagados o entregados del pasajero."""
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = BoletoSerializer
 
@@ -144,13 +120,9 @@ class MisBoletosAPI(generics.ListAPIView):
         ).order_by('-id')
 
 # ==============================================================================
-# GESTIÓN ADMINISTRATIVA DE SERVICIOS (ADMIN_FLOTA)
+# GESTIÓN CRUD DE SERVICIOS (ADMIN)
 # ==============================================================================
 class GestionServiciosAPI(generics.ListCreateAPIView):
-    """
-    Endpoint administrativo para listar y dar de alta nuevos recorridos e
-    itinerarios en la base de datos de transporte.
-    """
     permission_classes = [EsAdminFlota]
     queryset = Servicio.objects.all().order_by('-fecha_salida')
     serializer_class = ServicioSerializer
@@ -158,38 +130,28 @@ class GestionServiciosAPI(generics.ListCreateAPIView):
 GestionServicioAPI = GestionServiciosAPI
 
 class GestionServiciosDetalleAPI(generics.RetrieveUpdateDestroyAPIView):
-    """
-    Endpoint administrativo para recuperar, modificar o eliminar recorridos.
-    Implementa restricción de integridad impidiendo borrar recorridos con ventas.
-    """
     permission_classes = [EsAdminFlota]
     queryset = Servicio.objects.all()
     serializer_class = ServicioSerializer
 
     def perform_destroy(self, instance):
         if Boleto.objects.filter(servicio=instance, venta__estado__in=['PAGADO', 'ENTREGADO']).exists():
-            raise ValidationError({'error': 'No se puede eliminar: el recorrido tiene boletos pagados o entregados.'})
+            raise ValidationError({'error': 'No se puede eliminar servicio con boletos pagados o entregados.'})
         instance.delete()
 
 GestionServicioDetalleAPI = GestionServiciosDetalleAPI
 
 # ==============================================================================
-# CARRO DE COMPRAS Y CHECKOUT TRANSACCIONAL
+# CARRO, CHECKOUT (PENDIENTE) Y PAGO CON BLOQUEO PESIMISTA
 # ==============================================================================
 class CarroPasajesAPI(APIView):
-    """
-    Gestión del carro de compras persistente por usuario:
-    - GET: Recupera el estado y desglose de pasajes agregados.
-    - POST: Agrega un asiento al carro con validación de RUT chileno.
-    - DELETE: Vacía la totalidad de ítems del carro del usuario.
-    """
+    """Gestión de carro de compras."""
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(responses={200: CarroPasajesSerializer})
     def get(self, request):
         carro, _ = CarroPasajes.objects.get_or_create(usuario=request.user)
-        serializer = CarroPasajesSerializer(carro)
-        return Response(serializer.data)
+        return Response(CarroPasajesSerializer(carro).data)
 
     @extend_schema(request=AgregarCarroInputSerializer, responses={201: CarroPasajesSerializer})
     def post(self, request):
@@ -206,7 +168,7 @@ class CarroPasajesAPI(APIView):
         asiento = get_object_or_404(Asiento, id=data['asiento_id'], bus=servicio.bus)
 
         if Boleto.objects.filter(servicio=servicio, asiento=asiento, venta__estado__in=['PAGADO', 'ENTREGADO']).exists():
-            return Response({'error': 'El asiento ya se encuentra adquirido.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'El asiento ya fue adquirido.'}, status=status.HTTP_400_BAD_REQUEST)
 
         carro, _ = CarroPasajes.objects.get_or_create(usuario=request.user)
         ItemCarro.objects.update_or_create(
@@ -219,13 +181,13 @@ class CarroPasajesAPI(APIView):
     def delete(self, request):
         carro, _ = CarroPasajes.objects.get_or_create(usuario=request.user)
         carro.items.all().delete()
-        return Response({'mensaje': 'Carro vaciado correctamente.'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'mensaje': 'Carro vaciado.'}, status=status.HTTP_204_NO_CONTENT)
 
 class CheckoutAPI(APIView):
     """
-    Checkout transaccional atómico:
-    Aplica bloqueo pesimista select_for_update directamente sobre los registros
-    físicos de la tabla Asiento para impedir colisiones o sobreventa en concurrencia.
+    PASO 1: Checkout.
+    Genera la venta en estado PENDIENTE con sus boletos asociados y vacía el carro.
+    No descuenta cupo todavía (el cupo se valida y descuenta al momento del pago).
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -238,24 +200,12 @@ class CheckoutAPI(APIView):
         if not items:
             return Response({'error': 'El carro está vacío.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Bloqueo pesimista sobre las butacas reales para prevenir condiciones de carrera
-        asientos_ids = [item.asiento_id for item in items]
-        list(Asiento.objects.filter(id__in=asientos_ids).select_for_update())
-
-        # Verificación de integridad: asegurar que ningún asiento haya sido adquirido
-        for item in items:
-            if Boleto.objects.filter(
-                servicio=item.servicio, 
-                asiento=item.asiento, 
-                venta__estado__in=['PAGADO', 'ENTREGADO']
-            ).exists():
-                return Response(
-                    {'error': f'El asiento #{item.asiento.numero} ya fue adquirido por otro usuario.'}, 
-                    status=status.HTTP_409_CONFLICT
-                )
-
         total = sum(item.obtener_subtotal() for item in items)
-        venta = Venta.objects.create(usuario=request.user, total=total, estado='PAGADO')
+        venta = Venta.objects.create(
+            usuario=request.user,
+            total=total,
+            estado='PENDIENTE'
+        )
 
         for item in items:
             Boleto.objects.create(
@@ -270,14 +220,79 @@ class CheckoutAPI(APIView):
         carro.items.all().delete()
         return Response(VentaSerializer(venta).data, status=status.HTTP_201_CREATED)
 
+class PagarVentaAPI(APIView):
+    """
+    PASO 2: Confirmación de Pago.
+    Pasa una venta de PENDIENTE a PAGADO.
+    Aplica bloqueo pesimista con select_for_update sobre los asientos involucrados.
+    Si algún asiento ya fue pagado por otro usuario, se aborta y se rechaza.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: VentaSerializer})
+    @transaction.atomic
+    def post(self, request, pk):
+        venta = get_object_or_404(Venta, id=pk, usuario=request.user)
+
+        if venta.estado != 'PENDIENTE':
+            return Response(
+                {'error': f'Solo se pueden pagar ventas en estado PENDIENTE. Estado actual: {venta.estado}.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        boletos = list(venta.boletos.select_related('servicio', 'asiento').all())
+        asientos_ids = [b.asiento_id for b in boletos]
+
+        # Bloqueo pesimista a nivel de fila sobre las butacas
+        list(Asiento.objects.filter(id__in=asientos_ids).select_for_update())
+
+        # Validación atómica de disponibilidad real
+        for b in boletos:
+            if Boleto.objects.filter(
+                servicio=b.servicio,
+                asiento=b.asiento,
+                venta__estado__in=['PAGADO', 'ENTREGADO']
+            ).exclude(venta=venta).exists():
+                return Response(
+                    {'error': f'El asiento #{b.asiento.numero} ya fue adquirido por otro usuario.'},
+                    status=status.HTTP_409_CONFLICT
+                )
+
+        venta.estado = 'PAGADO'
+        venta.save()
+        return Response(VentaSerializer(venta).data, status=status.HTTP_200_OK)
+
+class CancelarVentaAPI(APIView):
+    """
+    Cancela una venta del usuario autenticado (desde PENDIENTE o PAGADO),
+    liberando inmediatamente los asientos.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: VentaSerializer})
+    @transaction.atomic
+    def post(self, request, pk):
+        venta = get_object_or_404(Venta, id=pk, usuario=request.user)
+
+        if venta.estado not in ['PENDIENTE', 'PAGADO']:
+            return Response(
+                {'error': f'No se puede cancelar una venta en estado {venta.estado}.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        venta.estado = 'CANCELADO'
+        venta.save()
+        return Response(VentaSerializer(venta).data, status=status.HTTP_200_OK)
+
 # ==============================================================================
-# GESTIÓN Y TRANSICIÓN DE ESTADOS DE VENTA
+# CAMBIO DE ESTADOS ADMINISTRATIVO
 # ==============================================================================
 class CambiarEstadoVentaAPI(APIView):
     """
-    Transición de estados de compra por parte de administradores de flota.
-    Permite transicionar entre PAGADO, ENTREGADO y CANCELADO garantizando
-    consistencia referencial sobre las butacas involucradas.
+    Transición de estados por parte del Administrador de Flota.
+    Valida los saltos de estado permitidos:
+    - PENDIENTE -> PAGADO o CANCELADO
+    - PAGADO -> ENTREGADO o CANCELADO
     """
     permission_classes = [EsAdminFlota]
 
@@ -289,20 +304,33 @@ class CambiarEstadoVentaAPI(APIView):
         serializer.is_valid(raise_exception=True)
         nuevo_estado = serializer.validated_data['estado']
 
-        # Si una venta cancelada se reactiva, bloquear asientos y verificar disponibilidad
-        if venta.estado == 'CANCELADO' and nuevo_estado in ['PAGADO', 'ENTREGADO']:
+        # Validaciones de transiciones lógicas
+        transiciones_validas = {
+            'PENDIENTE': ['PAGADO', 'CANCELADO'],
+            'PAGADO': ['ENTREGADO', 'CANCELADO'],
+            'ENTREGADO': [],
+            'CANCELADO': []
+        }
+
+        if nuevo_estado not in transiciones_validas.get(venta.estado, []):
+            return Response(
+                {'error': f'Transición no permitida: de {venta.estado} a {nuevo_estado}.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if nuevo_estado in ['PAGADO', 'ENTREGADO']:
             asientos_ids = [b.asiento_id for b in venta.boletos.all()]
             list(Asiento.objects.filter(id__in=asientos_ids).select_for_update())
 
             for b in venta.boletos.all():
                 if Boleto.objects.filter(
-                    servicio=b.servicio, 
-                    asiento=b.asiento, 
+                    servicio=b.servicio,
+                    asiento=b.asiento,
                     venta__estado__in=['PAGADO', 'ENTREGADO']
                 ).exclude(venta=venta).exists():
                     return Response(
-                        {'error': f'Conflicto: El asiento #{b.asiento.numero} ya fue adquirido por otra orden.'},
-                        status=status.HTTP_400_BAD_REQUEST
+                        {'error': f'Conflicto: El asiento #{b.asiento.numero} ya está ocupado por otra orden.'},
+                        status=status.HTTP_409_CONFLICT
                     )
 
         venta.estado = nuevo_estado

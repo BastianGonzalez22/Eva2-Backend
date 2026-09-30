@@ -1,7 +1,7 @@
 """
 MÓDULO DE VISTAS WEB (transporte/views.py)
-Catálogo, autenticación, carro de compras persistente, checkout atómico
-con select_for_update en Asiento y panel administrativo de flota.
+Catálogo, autenticación, carro de compras, flujo PENDIENTE -> PAGADO,
+comprobante y panel administrativo para gestión de flota.
 """
 
 from django.shortcuts import render, get_object_or_404, redirect
@@ -22,7 +22,6 @@ from .models import (
 # PERMISOS
 # ==============================================================================
 def es_administrador(user):
-    """Verifica si el usuario es staff o posee el rol ADMIN_FLOTA."""
     return user.is_authenticated and (
         user.is_staff or 
         (hasattr(user, 'perfil') and user.perfil.rol == 'ADMIN_FLOTA')
@@ -32,7 +31,6 @@ def es_administrador(user):
 # 1. CATÁLOGO Y BÚSQUEDA PÚBLICA
 # ==============================================================================
 def home(request):
-    """Despliega recorridos disponibles y aplica filtros de origen y destino."""
     origen_id = request.GET.get('origen')
     destino_id = request.GET.get('destino')
     
@@ -54,7 +52,6 @@ def home(request):
 # 2. AUTENTICACIÓN
 # ==============================================================================
 def login_view(request):
-    """Inicio de sesión para usuarios."""
     if request.method == 'POST':
         user_input = request.POST.get('username')
         pass_input = request.POST.get('password')
@@ -66,12 +63,10 @@ def login_view(request):
     return render(request, 'login.html')
 
 def logout_view(request):
-    """Cierre de sesión."""
     auth_logout(request)
     return redirect('home')
 
 def registro_view(request):
-    """Registro de pasajero con creación automática de su carro de compras."""
     if request.method == 'POST':
         user_input = request.POST.get('username')
         pass_input = request.POST.get('password')
@@ -86,13 +81,9 @@ def registro_view(request):
     return render(request, 'registro.html')
 
 # ==============================================================================
-# 3. DETALLE DE SERVICIO Y SELECCIÓN DE ASIENTO
+# 3. DETALLE DE SERVICIO Y MAPA DE ASIENTOS
 # ==============================================================================
 def detalle_servicio(request, servicio_id):
-    """
-    Mapa de asientos:
-    Según la pauta, solo se consideran ocupados los asientos con ventas PAGADO o ENTREGADO.
-    """
     servicio = get_object_or_404(Servicio, id=servicio_id)
     asientos_query = servicio.bus.asientos.all().order_by('numero')
     
@@ -159,11 +150,10 @@ def detalle_servicio(request, servicio_id):
     })
 
 # ==============================================================================
-# 4. CARRO DE COMPRAS Y CHECKOUT CON SELECT_FOR_UPDATE
+# 4. CARRO DE COMPRAS, CHECKOUT (PENDIENTE) Y PAGO CON SELECT_FOR_UPDATE
 # ==============================================================================
 @login_required(login_url='login')
 def ver_carro(request):
-    """Muestra los pasajes agregados por el usuario actual."""
     carro, _ = CarroPasajes.objects.get_or_create(usuario=request.user)
     items = carro.items.select_related('servicio', 'asiento').all()
     
@@ -185,7 +175,6 @@ def ver_carro(request):
 
 @login_required(login_url='login')
 def eliminar_item_carro(request, item_id):
-    """Quita un elemento del carro."""
     carro = get_object_or_404(CarroPasajes, usuario=request.user)
     ItemCarro.objects.filter(carro=carro, id=item_id).delete()
     messages.info(request, 'Pasaje retirado del carro.')
@@ -194,10 +183,7 @@ def eliminar_item_carro(request, item_id):
 @login_required(login_url='login')
 @transaction.atomic
 def procesar_checkout(request):
-    """
-    Checkout transaccional con select_for_update sobre la entidad Asiento
-    para asegurar atomicidad y protección contra condiciones de carrera.
-    """
+    """Crea la venta en estado PENDIENTE y vacía el carro."""
     carro = get_object_or_404(CarroPasajes, usuario=request.user)
     items = list(carro.items.select_related('servicio', 'asiento').all())
     
@@ -205,20 +191,11 @@ def procesar_checkout(request):
         messages.error(request, 'Tu carro está vacío.')
         return redirect('home')
 
-    # Bloqueo a nivel de fila sobre las butacas involucradas
-    asientos_ids = [item.asiento_id for item in items]
-    list(Asiento.objects.filter(id__in=asientos_ids).select_for_update())
-
-    for item in items:
-        if Boleto.objects.filter(servicio=item.servicio, asiento=item.asiento, venta__estado__in=['PAGADO', 'ENTREGADO']).exists():
-            messages.error(request, f'El asiento #{item.asiento.numero} ya fue adquirido por otro usuario.')
-            return redirect('ver_carro')
-
     total = sum(item.obtener_subtotal() for item in items)
     venta = Venta.objects.create(
         usuario=request.user,
         total=total,
-        estado='PAGADO'
+        estado='PENDIENTE'
     )
 
     ultimo_boleto = None
@@ -233,19 +210,65 @@ def procesar_checkout(request):
         )
 
     carro.items.all().delete()
-    messages.success(request, '¡Compra realizada con éxito!')
+    messages.info(request, 'Orden generada en estado PENDIENTE. Confirma tu pago a continuación.')
     return redirect('comprobante', boleto_id=ultimo_boleto.id)
 
+@login_required(login_url='login')
+@transaction.atomic
+def pagar_orden_web(request, venta_id):
+    """Pasa la orden de PENDIENTE a PAGADO con bloqueo pesimista en Asiento."""
+    venta = get_object_or_404(Venta, id=venta_id, usuario=request.user)
+
+    if venta.estado != 'PENDIENTE':
+        messages.warning(request, f'La orden ya se encuentra en estado {venta.estado}.')
+        primer_boleto = venta.boletos.first()
+        return redirect('comprobante', boleto_id=primer_boleto.id)
+
+    boletos = list(venta.boletos.select_related('servicio', 'asiento').all())
+    asientos_ids = [b.asiento_id for b in boletos]
+
+    # Bloqueo pesimista sobre las butacas
+    list(Asiento.objects.filter(id__in=asientos_ids).select_for_update())
+
+    for b in boletos:
+        if Boleto.objects.filter(
+            servicio=b.servicio, 
+            asiento=b.asiento, 
+            venta__estado__in=['PAGADO', 'ENTREGADO']
+        ).exclude(venta=venta).exists():
+            messages.error(request, f'El asiento #{b.asiento.numero} ya fue adquirido por otro usuario.')
+            return redirect('comprobante', boleto_id=b.id)
+
+    venta.estado = 'PAGADO'
+    venta.save()
+    messages.success(request, '¡Pago realizado con éxito! Tus pasajes han sido emitidos.')
+    return redirect('comprobante', boleto_id=boletos[0].id)
+
+@login_required(login_url='login')
+def cancelar_orden_web(request, venta_id):
+    """Cancela la orden y libera los asientos."""
+    venta = get_object_or_404(Venta, id=venta_id, usuario=request.user)
+    if venta.estado in ['PENDIENTE', 'PAGADO']:
+        venta.estado = 'CANCELADO'
+        venta.save()
+        messages.success(request, 'Orden cancelada exitosamente.')
+    else:
+        messages.error(request, 'No se puede cancelar esta orden.')
+    primer_boleto = venta.boletos.first()
+    return redirect('comprobante', boleto_id=primer_boleto.id)
+
 def comprobante(request, boleto_id):
-    """Muestra comprobante con datos del boleto."""
+    """Muestra el comprobante con estado y opciones de pago."""
     boleto = get_object_or_404(Boleto, id=boleto_id)
-    return render(request, 'comprobante.html', {'boleto': boleto})
+    return render(request, 'comprobante.html', {
+        'boleto': boleto,
+        'venta': boleto.venta
+    })
 
 # ==============================================================================
 # 5. GESTIÓN DE FLOTA (ADMINISTRADOR)
 # ==============================================================================
 def gestion_servicios(request):
-    """Panel CRUD para administrador de flota."""
     if not es_administrador(request.user):
         messages.error(request, 'Acceso denegado: Requiere rol ADMIN_FLOTA.')
         return redirect('home')
@@ -258,7 +281,6 @@ def gestion_servicios(request):
     if request.method == 'POST':
         accion = request.POST.get('accion')
 
-        # --- CIUDADES ---
         if accion == 'crear_ciudad':
             nombre = request.POST.get('nombre_ciudad', '').strip()
             if nombre:
@@ -289,7 +311,6 @@ def gestion_servicios(request):
                 messages.success(request, f'Ciudad "{ciudad.nombre}" eliminada.')
             return redirect('gestion_servicios')
 
-        # --- BUSES ---
         elif accion == 'crear_bus':
             patente = request.POST.get('patente', '').strip().upper()
             try:
@@ -337,7 +358,6 @@ def gestion_servicios(request):
                 messages.success(request, f'Bus {bus.patente} eliminado.')
             return redirect('gestion_servicios')
 
-        # --- SERVICIOS ---
         elif accion == 'crear_servicio':
             origen_id = request.POST.get('origen')
             destino_id = request.POST.get('destino')
@@ -409,7 +429,7 @@ def gestion_servicios(request):
             servicio = get_object_or_404(Servicio, id=servicio_id)
 
             if Boleto.objects.filter(servicio=servicio, venta__estado__in=['PAGADO', 'ENTREGADO']).exists():
-                messages.error(request, 'No se puede eliminar: tiene boletos asociados (pagados o entregados).')
+                messages.error(request, 'No se puede eliminar: tiene boletos asociados.')
             else:
                 ItemCarro.objects.filter(servicio=servicio).delete()
                 servicio.delete()
