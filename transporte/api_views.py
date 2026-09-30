@@ -8,7 +8,7 @@ Endpoints RESTful bajo Django REST Framework:
 - Carro de compras persistente por usuario.
 - Ciclo de venta: PENDIENTE -> PAGADO -> ENTREGADO / CANCELADO.
 - Bloqueo pesimista con select_for_update en Asiento contra sobreventa.
-- CRUD administrativo de servicios de transporte.
+- CRUD administrativo de servicios con control estricto de integridad.
 ==============================================================================
 """
 
@@ -191,7 +191,7 @@ class GestionServiciosDetalleAPI(generics.RetrieveUpdateDestroyAPIView):
     Endpoint de administración:
     - GET: Detalle de un recorrido.
     - PUT/PATCH: Modificación de itinerario o tarifas.
-    - DELETE: Eliminación con protección de integridad (impide borrar con ventas).
+    - DELETE: Eliminación con protección de integridad (impide borrar si tiene boletos).
     """
     permission_classes = [EsAdminFlota]
     queryset = Servicio.objects.all()
@@ -199,10 +199,15 @@ class GestionServiciosDetalleAPI(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_destroy(self, instance):
         """
-        Valida que el servicio no posea boletos pagados antes de permitir su eliminación.
+        Valida que el servicio no posea NINGÚN boleto asociado (sea pendiente,
+        pagado, entregado o cancelado) antes de permitir su eliminación para
+        evitar excepciones de ProtectedError en la base de datos.
         """
-        if Boleto.objects.filter(servicio=instance, venta__estado__in=['PAGADO', 'ENTREGADO']).exists():
-            raise ValidationError({'error': 'No se puede eliminar un servicio con boletos pagados o entregados.'})
+        if Boleto.objects.filter(servicio=instance).exists():
+            raise ValidationError({'error': 'No se puede eliminar: el recorrido tiene boletos registrados asociados.'})
+        
+        # Limpia posibles pasajes temporales en carros antes de borrar
+        ItemCarro.objects.filter(servicio=instance).delete()
         instance.delete()
 
 
