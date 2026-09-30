@@ -1,7 +1,7 @@
 """
 MÓDULO DE VISTAS WEB (transporte/views.py)
 Catálogo, autenticación, carro de compras persistente, checkout atómico
-y panel administrativo para gestión de flota.
+con select_for_update en Asiento y panel administrativo de flota.
 """
 
 from django.shortcuts import render, get_object_or_404, redirect
@@ -92,12 +92,10 @@ def detalle_servicio(request, servicio_id):
     """
     Mapa de asientos:
     Según la pauta, solo se consideran ocupados los asientos con ventas PAGADO o ENTREGADO.
-    El stock no se descuenta al agregar al carro.
     """
     servicio = get_object_or_404(Servicio, id=servicio_id)
     asientos_query = servicio.bus.asientos.all().order_by('numero')
     
-    # Asientos vendidos definitivamente
     ocupados = list(Boleto.objects.filter(
         servicio=servicio, 
         venta__estado__in=['PAGADO', 'ENTREGADO']
@@ -161,7 +159,7 @@ def detalle_servicio(request, servicio_id):
     })
 
 # ==============================================================================
-# 4. CARRO DE COMPRAS Y CHECKOUT
+# 4. CARRO DE COMPRAS Y CHECKOUT CON SELECT_FOR_UPDATE
 # ==============================================================================
 @login_required(login_url='login')
 def ver_carro(request):
@@ -197,15 +195,19 @@ def eliminar_item_carro(request, item_id):
 @transaction.atomic
 def procesar_checkout(request):
     """
-    Checkout transaccional con select_for_update.
-    Aquí es donde compiten los usuarios: el primero que completa el checkout se queda el asiento.
+    Checkout transaccional con select_for_update sobre la entidad Asiento
+    para asegurar atomicidad y protección contra condiciones de carrera.
     """
     carro = get_object_or_404(CarroPasajes, usuario=request.user)
-    items = carro.items.select_for_update().select_related('servicio', 'asiento').all()
+    items = list(carro.items.select_related('servicio', 'asiento').all())
     
-    if not items.exists():
+    if not items:
         messages.error(request, 'Tu carro está vacío.')
         return redirect('home')
+
+    # Bloqueo a nivel de fila sobre las butacas involucradas
+    asientos_ids = [item.asiento_id for item in items]
+    list(Asiento.objects.filter(id__in=asientos_ids).select_for_update())
 
     for item in items:
         if Boleto.objects.filter(servicio=item.servicio, asiento=item.asiento, venta__estado__in=['PAGADO', 'ENTREGADO']).exists():
