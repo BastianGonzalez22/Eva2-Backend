@@ -8,8 +8,10 @@ Controlador de interfaz de usuario renderizada en servidor (SSR):
 3. Inspección interactiva de butacas con diferenciación tarifaria Semicama/Salón Cama.
 4. Carro de compras persistente por usuario y orquestación del Checkout.
 5. Transición atómica de estados: Creación en PENDIENTE y confirmación a PAGADO.
-6. Panel administrativo exclusivo para rol ADMIN_FLOTA (Gestión de Ciudades, Buses y Servicios).
-7. Vista de comprobante digital y control personalizado de errores HTTP 404.
+6. Historial de compras y reservas ("Mis Compras") para el pasajero autenticado.
+7. Panel administrativo exclusivo para rol ADMIN_FLOTA (Gestión de Ciudades, Buses y Servicios)
+   con captura controlada de ProtectedError para integridad referencial.
+8. Vista de comprobante digital y control personalizado de errores HTTP 404.
 ==============================================================================
 """
 
@@ -188,7 +190,7 @@ def detalle_servicio(request, servicio_id):
     })
 
 # ==============================================================================
-# SECCIÓN 5: CARRO DE COMPRAS Y CICLO DE PAGO CON BLOQUEO PESIMISTA
+# SECCIÓN 5: CARRO DE COMPRAS, CHECKOUT, PAGO Y MIS COMPRAS
 # ==============================================================================
 @login_required(login_url='login')
 def ver_carro(request):
@@ -325,6 +327,16 @@ def comprobante(request, boleto_id):
         'venta': boleto.venta
     })
 
+@login_required(login_url='login')
+def mis_compras_view(request):
+    """
+    Despliega el historial de compras del usuario autenticado.
+    Permite visualizar órdenes en estado PENDIENTE (con botón para pagar o cancelar)
+    y boletos emitidos en estado PAGADO o ENTREGADO.
+    """
+    ventas = Venta.objects.filter(usuario=request.user).prefetch_related('boletos__servicio', 'boletos__asiento').order_by('-fecha_venta')
+    return render(request, 'mis_compras.html', {'ventas': ventas})
+
 # ==============================================================================
 # SECCIÓN 6: PANEL ADMINISTRATIVO DE FLOTA (ADMIN_FLOTA)
 # ==============================================================================
@@ -377,8 +389,11 @@ def gestion_servicios(request):
             if Servicio.objects.filter(models.Q(origen=ciudad) | models.Q(destino=ciudad)).exists():
                 messages.error(request, f'No se puede eliminar "{ciudad.nombre}" porque tiene servicios asignados.')
             else:
-                ciudad.delete()
-                messages.success(request, f'Ciudad "{ciudad.nombre}" eliminada.')
+                try:
+                    ciudad.delete()
+                    messages.success(request, f'Ciudad "{ciudad.nombre}" eliminada.')
+                except models.ProtectedError:
+                    messages.error(request, f'No se puede eliminar "{ciudad.nombre}": tiene registros protegidos asociados.')
             return redirect('gestion_servicios')
 
         # ----------------------------------------------------------------------
@@ -426,9 +441,12 @@ def gestion_servicios(request):
             if Servicio.objects.filter(bus=bus).exists():
                 messages.error(request, f'No se puede eliminar el bus {bus.patente} porque tiene recorridos asociados.')
             else:
-                bus.asientos.all().delete()
-                bus.delete()
-                messages.success(request, f'Bus {bus.patente} eliminado.')
+                try:
+                    bus.asientos.all().delete()
+                    bus.delete()
+                    messages.success(request, f'Bus {bus.patente} eliminado.')
+                except models.ProtectedError:
+                    messages.error(request, f'No se puede eliminar el bus {bus.patente}: tiene registros protegidos asociados.')
             return redirect('gestion_servicios')
 
         # ----------------------------------------------------------------------
@@ -504,12 +522,16 @@ def gestion_servicios(request):
             servicio_id = request.POST.get('servicio_id')
             servicio = get_object_or_404(Servicio, id=servicio_id)
 
-            if Boleto.objects.filter(servicio=servicio, venta__estado__in=['PAGADO', 'ENTREGADO']).exists():
-                messages.error(request, 'No se puede eliminar: tiene boletos asociados.')
+            # Verifica si tiene boletos asociados
+            if Boleto.objects.filter(servicio=servicio).exists():
+                messages.error(request, f'No se puede eliminar el servicio #{servicio_id}: tiene boletos registrados asociados.')
             else:
-                ItemCarro.objects.filter(servicio=servicio).delete()
-                servicio.delete()
-                messages.success(request, f'Servicio #{servicio_id} eliminado.')
+                try:
+                    ItemCarro.objects.filter(servicio=servicio).delete()
+                    servicio.delete()
+                    messages.success(request, f'Servicio #{servicio_id} eliminado exitosamente.')
+                except models.ProtectedError:
+                    messages.error(request, f'No se puede eliminar el servicio #{servicio_id}: la base de datos bloquea el borrado por registros protegidos.')
             return redirect('gestion_servicios')
 
     for s in servicios:

@@ -4,7 +4,7 @@ CONFIGURACIÓN DE ENRUTAMIENTO PRINCIPAL (core/urls.py)
 ------------------------------------------------------------------------------
 Matriz de endpoints RESTful conforme a la pauta de evaluación:
 - Rutas públicas: catálogo, búsqueda con filtros, Swagger/OpenAPI.
-- Rutas de pasajero autenticado: carro de compras, checkout, pago y boletos.
+- Rutas de pasajero autenticado: carro de compras, checkout, pago, boletos e historial.
 - Rutas de administrador: gestión de flota, CRUD de recorridos y estados de venta.
 ==============================================================================
 """
@@ -31,6 +31,7 @@ urlpatterns = [
     path('venta/<int:venta_id>/pagar/', views.pagar_orden_web, name='pagar_orden_web'),
     path('venta/<int:venta_id>/cancelar/', views.cancelar_orden_web, name='cancelar_orden_web'),
     path('comprobante/<int:boleto_id>/', views.comprobante, name='comprobante'),
+    path('mis-compras/', views.mis_compras_view, name='mis_compras'),
     
     path('gestion/', views.gestion_servicios, name='gestion_servicios'),
 
@@ -43,11 +44,8 @@ urlpatterns = [
     # -------------------------------------------------------------------------
     # 3. ENDPOINTS DE RECORRIDOS (MATRIZ PAUTA)
     # -------------------------------------------------------------------------
-    # Búsqueda pública con filtros (origen, destino, precio, fecha)
     path('api/servicios/buscar/', api_views.BuscarServiciosAPI.as_view(), name='api_servicios_buscar'),
-    # Mapa de asientos por servicio
     path('api/servicios/<int:servicio_id>/asientos/', api_views.AsientosServicioAPI.as_view(), name='api_asientos_servicio'),
-    # CRUD de Servicios para Admin de Flota (POST, GET, PUT, PATCH, DELETE)
     path('api/servicios/', api_views.GestionServiciosAPI.as_view(), name='api_servicios_crud'),
     path('api/servicios/<int:pk>/', api_views.GestionServiciosDetalleAPI.as_view(), name='api_servicios_crud_detalle'),
 
@@ -55,17 +53,13 @@ urlpatterns = [
     # 4. CARRO DE COMPRAS, CHECKOUT Y TRANSICIÓN DE VENTAS (MATRIZ PAUTA)
     # -------------------------------------------------------------------------
     path('api/carro-pasajes/', api_views.CarroPasajesAPI.as_view(), name='api_carro'),
-    # Checkout oficial de la matriz
     path('api/ventas/checkout/', api_views.CheckoutAPI.as_view(), name='api_ventas_checkout'),
-    # Alias de compatibilidad
     path('api/carro-pasajes/checkout/', api_views.CheckoutAPI.as_view(), name='api_carro_checkout'),
     
-    # Pagos y cancelaciones
     path('api/ventas/<int:pk>/pagar/', api_views.PagarVentaAPI.as_view(), name='api_pagar_venta'),
     path('api/ventas/<int:pk>/cancelar/', api_views.CancelarVentaAPI.as_view(), name='api_cancelar_venta'),
     path('api/ventas/<int:pk>/estado/', api_views.CambiarEstadoVentaAPI.as_view(), name='api_cambiar_estado'),
     
-    # Historial de pasajero
     path('api/mis-boletos/', api_views.MisBoletosAPI.as_view(), name='api_mis_boletos'),
 
     # -------------------------------------------------------------------------
@@ -76,5 +70,4 @@ urlpatterns = [
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
 
-# Manejador de error 404 personalizado
 handler404 = 'transporte.views.error_404_view'

@@ -71,15 +71,20 @@
             <a href="{% url 'pagar_orden_web' boleto.venta.id %}" class="btn btn-success btn-lg px-4 me-2">
               <i class="bi bi-credit-card"></i> Confirmar y Pagar Ahora
             </a>
-            <a href="{% url 'cancelar_orden_web' boleto.venta.id %}" class="btn btn-outline-danger btn-lg px-4" onclick="return confirm('¿Seguro que deseas cancelar esta orden?');">
+            <a href="{% url 'cancelar_orden_web' boleto.venta.id %}" class="btn btn-outline-danger btn-lg px-4 me-2" onclick="return confirm('¿Seguro que deseas cancelar esta orden?');">
               Cancelar Orden
+            </a>
+            <a href="{% url 'mis_compras' %}" class="btn btn-outline-secondary btn-lg px-4">
+              Mis Compras
             </a>
           {% elif boleto.venta.estado == 'PAGADO' %}
             <a href="{% url 'cancelar_orden_web' boleto.venta.id %}" class="btn btn-outline-danger me-2" onclick="return confirm('¿Deseas cancelar tu pasaje? El asiento quedará liberado.');">
               Anular / Cancelar Pasaje
             </a>
+            <a href="{% url 'mis_compras' %}" class="btn btn-outline-primary me-2">Mis Compras</a>
             <a href="{% url 'home' %}" class="btn btn-primary">Volver al Inicio</a>
           {% else %}
+            <a href="{% url 'mis_compras' %}" class="btn btn-outline-primary me-2">Mis Compras</a>
             <a href="{% url 'home' %}" class="btn btn-primary">Volver al Inicio</a>
           {% endif %}
         </div>
