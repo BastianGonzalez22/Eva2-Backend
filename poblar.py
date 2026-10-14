@@ -4,6 +4,7 @@ Ejecutar con: python poblar.py
 """
 import os
 import django
+from decimal import Decimal
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 django.setup()
@@ -11,12 +12,23 @@ django.setup()
 from django.contrib.auth.models import User
 from django.utils import timezone
 from datetime import timedelta
-from transporte.models import PerfilUsuario, Ciudad, Bus, Asiento, Servicio
+from transporte.models import PerfilUsuario, TipoAsiento, Ciudad, Bus, Asiento, Servicio
 
 def ejecutar():
     print("Iniciando carga de datos de prueba...")
 
-    # 1. USUARIOS Y PERFILES (ADMIN Y PASAJERO)
+    # 1. TIPOS DE ASIENTO DINÁMICOS
+    tipo_cama, _ = TipoAsiento.objects.get_or_create(
+        codigo='SALON_CAMA',
+        defaults={'nombre': 'Salón Cama', 'multiplicador_precio': Decimal('1.20')}
+    )
+    tipo_semi, _ = TipoAsiento.objects.get_or_create(
+        codigo='SEMICAMA',
+        defaults={'nombre': 'Semicama', 'multiplicador_precio': Decimal('1.00')}
+    )
+    print("-> Tipos de asiento configurados.")
+
+    # 2. USUARIOS Y PERFILES (ADMIN Y PASAJERO)
     admin_user, _ = User.objects.get_or_create(username='admin')
     admin_user.set_password('admin123')
     admin_user.is_staff = True
@@ -38,7 +50,7 @@ def ejecutar():
     )
     print("-> Usuarios 'admin' y 'pasajero' configurados.")
 
-    # 2. CIUDADES
+    # 3. CIUDADES
     ciudades_nombres = ['Santiago', 'Temuco', 'Concepción', 'Puerto Montt', 'Valdivia', 'La Serena']
     ciudades = {}
     for nombre in ciudades_nombres:
@@ -46,7 +58,7 @@ def ejecutar():
         ciudades[nombre] = c
     print("-> Ciudades registradas.")
 
-    # 3. BUSES Y ASIENTOS
+    # 4. BUSES Y ASIENTOS
     buses_data = [
         ('ABCD12', 40),
         ('XYZW99', 40),
@@ -60,14 +72,14 @@ def ejecutar():
                 Asiento(
                     bus=bus,
                     numero=n,
-                    tipo='SALON_CAMA' if n <= 10 else 'SEMICAMA'
+                    tipo_asiento=tipo_cama if n <= 10 else tipo_semi
                 )
                 for n in range(1, cap + 1)
             ]
             Asiento.objects.bulk_create(asientos)
     print("-> Buses y asientos listos.")
 
-    # 4. SERVICIOS / ITINERARIOS
+    # 5. SERVICIOS / ITINERARIOS
     ahora = timezone.now()
     servicios_data = [
         (ciudades['Santiago'], ciudades['Temuco'], Bus.objects.get(patente='ABCD12'), ahora + timedelta(days=1, hours=2), 15000),
