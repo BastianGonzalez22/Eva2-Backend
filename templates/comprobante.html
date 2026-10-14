@@ -54,7 +54,12 @@
           </div>
           <div class="col-md-6">
             <p class="mb-1 text-muted"><strong>Pasajero:</strong></p>
-            <p>{{ boleto.nombre_pasajero }} (RUT: {{ boleto.rut_pasajero }})</p>
+            <p>
+              {{ boleto.nombre_pasajero }} {{ boleto.apellido_pasajero }} (RUT: {{ boleto.rut_pasajero }})
+              {% if boleto.es_menor %}
+                <span class="badge bg-warning text-dark ms-1">Menor de edad</span>
+              {% endif %}
+            </p>
           </div>
           <div class="col-12">
             <p class="mb-1 text-muted"><strong>Total Pagado:</strong></p>

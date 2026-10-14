@@ -1,54 +1,67 @@
-"""
-==============================================================================
-MÓDULO DE SERIALIZADORES DRF (transporte/serializers.py)
-------------------------------------------------------------------------------
-Transforma las estructuras de datos entre instancias de modelos ORM y 
-representaciones JSON para la API REST. Incluye serializadores de lectura, 
-escritura con validación, desgloses calculados y esquemas para Swagger/OpenAPI.
-==============================================================================
-"""
-
 from rest_framework import serializers
-from .models import Ciudad, Bus, Asiento, Servicio, Boleto, Venta, CarroPasajes, ItemCarro
+from .models import (
+    TipoAsiento, PerfilUsuario, Ciudad, Bus, Asiento, 
+    Servicio, Boleto, Venta, CarroPasajes, ItemCarro
+)
+
+
+class TipoAsientoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TipoAsiento
+        fields = ['id', 'codigo', 'nombre', 'multiplicador_precio']
+
+
+class PerfilUsuarioSerializer(serializers.ModelSerializer):
+    username = serializers.ReadOnlyField(source='usuario.username')
+    nombres = serializers.CharField(source='usuario.first_name', required=False)
+    apellidos = serializers.CharField(source='usuario.last_name', required=False)
+    email = serializers.EmailField(source='usuario.email', required=False)
+
+    class Meta:
+        model = PerfilUsuario
+        fields = [
+            'id', 'usuario', 'username', 'nombres', 'apellidos', 'email',
+            'rol', 'rut', 'telefono', 'fecha_nacimiento',
+            'contacto_emergencia_nombre', 'contacto_emergencia_telefono'
+        ]
+
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop('usuario', {})
+        user = instance.usuario
+        if 'first_name' in user_data:
+            user.first_name = user_data['first_name']
+        if 'last_name' in user_data:
+            user.last_name = user_data['last_name']
+        if 'email' in user_data:
+            user.email = user_data['email']
+        user.save()
+        return super().update(instance, validated_data)
 
 
 class CiudadSerializer(serializers.ModelSerializer):
-    """
-    Serializador para la entidad Ciudad. Expone id y nombre para listados
-    y selección de orígenes/destinos.
-    """
     class Meta:
         model = Ciudad
         fields = ['id', 'nombre']
 
 
 class BusSerializer(serializers.ModelSerializer):
-    """
-    Serializador para la entidad Bus. Expone id y la patente vehicular única.
-    """
     class Meta:
         model = Bus
         fields = ['id', 'patente']
 
 
 class AsientoSerializer(serializers.ModelSerializer):
-    """
-    Serializador para inspección de butacas. Informa número, tipo de asiento,
-    precio dinámico calculado y disponibilidad booleana en tiempo real.
-    """
+    tipo = serializers.ReadOnlyField()
+    tipo_nombre = serializers.ReadOnlyField(source='get_tipo_display')
     precio = serializers.IntegerField(read_only=True)
     ocupado = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Asiento
-        fields = ['id', 'numero', 'tipo', 'precio', 'ocupado']
+        fields = ['id', 'numero', 'tipo_asiento', 'tipo', 'tipo_nombre', 'precio', 'ocupado']
 
 
 class ServicioSerializer(serializers.ModelSerializer):
-    """
-    Serializador para servicios de transporte. Soporta lectura anidada con
-    nombres de ciudades y patente de bus, así como creación/edición mediante IDs.
-    """
     origen_nombre = serializers.ReadOnlyField(source='origen.nombre')
     destino_nombre = serializers.ReadOnlyField(source='destino.nombre')
     bus_patente = serializers.ReadOnlyField(source='bus.patente')
@@ -63,10 +76,6 @@ class ServicioSerializer(serializers.ModelSerializer):
 
 
 class BoletoSerializer(serializers.ModelSerializer):
-    """
-    Serializador para emisión y consulta de boletos de pasaje individuales.
-    Desglosa datos de ruta, butaca, pasajero y precio efectivamente cobrado.
-    """
     asiento_numero = serializers.ReadOnlyField(source='asiento.numero')
     servicio_desc = serializers.StringRelatedField(source='servicio')
 
@@ -75,15 +84,11 @@ class BoletoSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'venta', 'servicio', 'servicio_desc', 
             'asiento', 'asiento_numero', 'nombre_pasajero', 
-            'rut_pasajero', 'precio_pagado'
+            'apellido_pasajero', 'rut_pasajero', 'es_menor', 'precio_pagado'
         ]
 
 
 class VentaSerializer(serializers.ModelSerializer):
-    """
-    Serializador de cabecera de orden de compra. Serializa el cliente, total,
-    fecha, estado transaccional y la lista de boletos asociados emitidos.
-    """
     boletos = BoletoSerializer(many=True, read_only=True)
     usuario_nombre = serializers.ReadOnlyField(source='usuario.username')
 
@@ -93,10 +98,6 @@ class VentaSerializer(serializers.ModelSerializer):
 
 
 class ItemCarroSerializer(serializers.ModelSerializer):
-    """
-    Serializador para cada butaca reservada dentro del carro de compras.
-    Calcula el subtotal unitario según la categoría del asiento.
-    """
     subtotal = serializers.SerializerMethodField()
     asiento_numero = serializers.ReadOnlyField(source='asiento.numero')
     servicio_desc = serializers.StringRelatedField(source='servicio')
@@ -105,21 +106,15 @@ class ItemCarroSerializer(serializers.ModelSerializer):
         model = ItemCarro
         fields = [
             'id', 'servicio', 'servicio_desc', 'asiento', 
-            'asiento_numero', 'nombre_ocupante', 'rut_ocupante', 'subtotal'
+            'asiento_numero', 'nombre_ocupante', 'apellido_ocupante',
+            'rut_ocupante', 'es_menor', 'subtotal'
         ]
 
     def get_subtotal(self, obj):
-        """
-        Retorna el subtotal monetario del ítem invocando la lógica del modelo.
-        """
         return obj.obtener_subtotal()
 
 
 class CarroPasajesSerializer(serializers.ModelSerializer):
-    """
-    Serializador del carro de compras persistente. Expone el desglose de ítems
-    y computa la sumatoria acumulada total de la orden.
-    """
     items = ItemCarroSerializer(many=True, read_only=True)
     total = serializers.SerializerMethodField()
 
@@ -128,28 +123,28 @@ class CarroPasajesSerializer(serializers.ModelSerializer):
         fields = ['id', 'usuario', 'items', 'total']
 
     def get_total(self, obj):
-        """
-        Calcula la sumatoria de todos los subtotales de los pasajes en el carro.
-        """
         return sum(item.obtener_subtotal() for item in obj.items.all())
 
 
+class PasajeroIndividualInputSerializer(serializers.Serializer):
+    asiento_id = serializers.IntegerField(help_text="ID de la butaca")
+    nombre = serializers.CharField(max_length=100, help_text="Nombre del pasajero")
+    apellido = serializers.CharField(max_length=100, help_text="Apellido del pasajero")
+    rut = serializers.CharField(max_length=12, help_text="RUT chileno con guion")
+    es_menor = serializers.BooleanField(default=False, required=False, help_text="¿Es menor de edad?")
+
+
 class AgregarCarroInputSerializer(serializers.Serializer):
-    """
-    Serializador de validación para la acción POST de agregar un pasaje al carro.
-    Requiere servicio_id, asiento_id, nombre del ocupante y RUT chileno.
-    """
     servicio_id = serializers.IntegerField(help_text="ID del servicio programado")
-    asiento_id = serializers.IntegerField(help_text="ID de la butaca a seleccionar")
-    nombre = serializers.CharField(max_length=150, help_text="Nombre completo del pasajero")
-    rut = serializers.CharField(max_length=12, help_text="RUT chileno del pasajero (con guion)")
+    pasajeros = PasajeroIndividualInputSerializer(many=True, required=False)
+    asiento_id = serializers.IntegerField(required=False)
+    nombre = serializers.CharField(max_length=100, required=False)
+    apellido = serializers.CharField(max_length=100, required=False, default='')
+    rut = serializers.CharField(max_length=12, required=False)
+    es_menor = serializers.BooleanField(default=False, required=False)
 
 
 class CambiarEstadoSerializer(serializers.Serializer):
-    """
-    Serializador para la transición administrativa de estados de una Venta.
-    Restringe la entrada a los estados válidos del ciclo de vida del negocio.
-    """
     estado = serializers.ChoiceField(
         choices=['PENDIENTE', 'PAGADO', 'ENTREGADO', 'CANCELADO'],
         help_text="Nuevo estado a asignar a la orden de venta"

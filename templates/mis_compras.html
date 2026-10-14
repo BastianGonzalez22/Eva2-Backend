@@ -44,7 +44,13 @@
                     <td>
                       <span class="badge bg-primary">Asiento #{{ b.asiento.numero }} ({{ b.asiento.get_tipo_display }})</span>
                     </td>
-                    <td>{{ b.nombre_pasajero }} <br><small class="text-muted">RUT: {{ b.rut_pasajero }}</small></td>
+                    <td>
+                      {{ b.nombre_pasajero }} {{ b.apellido_pasajero }}
+                      {% if b.es_menor %}
+                        <span class="badge bg-warning text-dark ms-1">Menor</span>
+                      {% endif %}
+                      <br><small class="text-muted">RUT: {{ b.rut_pasajero }}</small>
+                    </td>
                     <td class="text-end fw-bold">${{ b.precio_pagado }} CLP</td>
                   </tr>
                 {% endfor %}

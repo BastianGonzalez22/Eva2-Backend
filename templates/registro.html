@@ -1,44 +1,105 @@
 {% extends 'base.html' %}
-{% block title %}Crear Cuenta - AndesSur{% endblock %}
+{% block title %}Crear Cuenta de Pasajero - AndesSur{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center align-items-center py-5">
-    <div class="col-md-6 col-lg-5 col-xl-4">
+<div class="row justify-content-center align-items-center py-4">
+    <div class="col-md-9 col-lg-7">
         <div class="card border-0 shadow-lg rounded-4 p-4 p-sm-5 bg-white">
             <div class="text-center mb-4">
                 <div class="d-inline-flex align-items-center justify-content-center bg-success bg-opacity-10 text-success rounded-circle mb-3" style="width: 64px; height: 64px;">
-                    <i class="bi bi-person-plus-fill fs-2"></i>
+                    <i class="bi bi-person-vcard-fill fs-2"></i>
                 </div>
-                <h3 class="fw-bold mb-1">Crea tu Cuenta</h3>
-                <p class="text-muted small">Regístrate para reservar pasajes y gestionar tus viajes</p>
+                <h3 class="fw-bold mb-1">Registro de Pasajero AndesSur</h3>
+                <p class="text-muted small">Completa tu ficha de viaje y contacto de emergencia para emitir pasajes</p>
             </div>
 
             <form method="POST">
                 {% csrf_token %}
                 
-                <div class="mb-3">
-                    <label class="form-label small fw-bold text-muted">Nombre de Usuario</label>
-                    <div class="input-group">
-                        <span class="input-group-text bg-light border-0"><i class="bi bi-person text-secondary"></i></span>
-                        <input type="text" name="username" class="form-control bg-light border-0 py-2" placeholder="Elige un nombre de usuario" required autofocus>
+                <!-- 1. Datos Personales del Pasajero -->
+                <h6 class="fw-bold text-primary border-bottom pb-2 mb-3">
+                    <i class="bi bi-person-lines-fill me-1"></i> 1. Datos Personales del Pasajero
+                </h6>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-6">
+                        <label class="form-label small fw-bold text-muted">Nombres</label>
+                        <input type="text" name="first_name" class="form-control bg-light border-0 py-2" placeholder="Ej: Bastián Marcelo" required autofocus>
+                    </div>
+                    <div class="col-sm-6">
+                        <label class="form-label small fw-bold text-muted">Apellidos</label>
+                        <input type="text" name="last_name" class="form-control bg-light border-0 py-2" placeholder="Ej: González Moya" required>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-4">
+                        <label class="form-label small fw-bold text-muted">RUT</label>
+                        <input type="text" name="rut" class="form-control bg-light border-0 py-2" placeholder="Ej: 21345678-9" required>
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label small fw-bold text-muted">Fecha de Nacimiento</label>
+                        <input type="date" name="fecha_nacimiento" class="form-control bg-light border-0 py-2" required>
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label small fw-bold text-muted">Teléfono Móvil</label>
+                        <input type="text" name="telefono" class="form-control bg-light border-0 py-2" placeholder="+56912345678" required>
                     </div>
                 </div>
 
                 <div class="mb-4">
-                    <label class="form-label small fw-bold text-muted">Contraseña</label>
+                    <label class="form-label small fw-bold text-muted">Correo Electrónico (Envío de Boletos)</label>
                     <div class="input-group">
-                        <span class="input-group-text bg-light border-0"><i class="bi bi-shield-lock text-secondary"></i></span>
-                        <input type="password" name="password" class="form-control bg-light border-0 py-2" placeholder="Crea tu contraseña" required>
+                        <span class="input-group-text bg-light border-0"><i class="bi bi-envelope text-secondary"></i></span>
+                        <input type="email" name="email" class="form-control bg-light border-0 py-2" placeholder="ejemplo@correo.cl" required>
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-success w-100 py-2 fw-semibold shadow-sm mb-3">
-                    <i class="bi bi-check-circle me-1"></i> Completar Registro
+                <!-- 2. Contacto de Emergencia (Normativa Buses Interurbanos) -->
+                <h6 class="fw-bold text-danger border-bottom pb-2 mb-3">
+                    <i class="bi bi-heart-pulse-fill me-1"></i> 2. Contacto de Emergencia en Ruta
+                </h6>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-sm-6">
+                        <label class="form-label small fw-bold text-muted">Nombre Contacto Emergencia</label>
+                        <input type="text" name="contacto_emergencia_nombre" class="form-control bg-light border-0 py-2" placeholder="Ej: María Moya (Madre)" required>
+                    </div>
+                    <div class="col-sm-6">
+                        <label class="form-label small fw-bold text-muted">Teléfono de Emergencia</label>
+                        <input type="text" name="contacto_emergencia_telefono" class="form-control bg-light border-0 py-2" placeholder="+56987654321" required>
+                    </div>
+                </div>
+
+                <!-- 3. Credenciales de Acceso -->
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="bi bi-shield-lock-fill me-1"></i> 3. Credenciales de Acceso
+                </h6>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-sm-6">
+                        <label class="form-label small fw-bold text-muted">Nombre de Usuario</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light border-0"><i class="bi bi-person text-secondary"></i></span>
+                            <input type="text" name="username" class="form-control bg-light border-0 py-2" placeholder="Ej: bastian_g" required>
+                        </div>
+                    </div>
+                    <div class="col-sm-6">
+                        <label class="form-label small fw-bold text-muted">Contraseña</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light border-0"><i class="bi bi-key text-secondary"></i></span>
+                            <input type="password" name="password" class="form-control bg-light border-0 py-2" placeholder="••••••••" required>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-success btn-lg w-100 py-2 fw-semibold shadow-sm mb-3">
+                    <i class="bi bi-check-circle me-1"></i> Completar Registro de Pasajero
                 </button>
 
                 <div class="text-center pt-2 border-top">
-                    <span class="small text-muted">¿Ya tienes una cuenta?</span>
-                    <a href="{% url 'login' %}" class="small fw-bold text-success text-decoration-none ms-1">Inicia sesión</a>
+                    <span class="small text-muted">¿Ya tienes una cuenta registrada?</span>
+                    <a href="{% url 'login' %}" class="small fw-bold text-success text-decoration-none ms-1">Inicia sesión aquí</a>
                 </div>
             </form>
         </div>

@@ -36,7 +36,12 @@
                                 </span>
                             </td>
                             <td>
-                                <div>{{ fila.item.nombre_ocupante }}</div>
+                                <div class="fw-semibold">
+                                    {{ fila.item.nombre_ocupante }} {{ fila.item.apellido_ocupante }}
+                                    {% if fila.item.es_menor %}
+                                        <span class="badge bg-warning text-dark ms-1">Menor</span>
+                                    {% endif %}
+                                </div>
                                 <small class="text-muted font-monospace">{{ fila.item.rut_ocupante }}</small>
                             </td>
                             <td><strong class="text-success fs-6">${{ fila.precio }}</strong></td>

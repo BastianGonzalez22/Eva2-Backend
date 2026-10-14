@@ -1,19 +1,5 @@
-"""
-==============================================================================
-MÓDULO DE MODELOS DE DOMINIO Y PERSISTENCIA (transporte/models.py)
-------------------------------------------------------------------------------
-Define las entidades estructurales para el sistema de venta de pasajes AndesSur:
-- Control de perfiles y roles de usuario (RBAC) con campo usuario.
-- Infraestructura de transporte: Ciudades, Buses y Butacas configurables.
-- Itinerarios y programación de Recorridos (Servicios).
-- Carro de compras persistente con marcas de tiempo (agregado_en, actualizado_en).
-- Cabecera de Ventas con estados y Boletos emitidos con restricción de unicidad.
-- Protección referencial con on_delete=models.PROTECT en ventas y servicios.
-- Señal post_save para creación automática de perfiles.
-==============================================================================
-"""
-
 import re
+from decimal import Decimal
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -21,18 +7,13 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 
-# ==============================================================================
-# VALIDACIÓN DE FORMATO E INTEGRIDAD
-# ==============================================================================
 def validar_rut_chileno(rut_str):
     """
-    Valida el formato y el dígito verificador de un RUT chileno usando el algoritmo Módulo 11.
-    Acepta formatos con o sin puntos y con guion (ej: 12.345.678-5 o 12345678-5).
-    Lanza ValidationError si el formato es inválido o el dígito verificador no coincide.
+    Valida que el RUT tenga un formato chileno válido (números + dígito verificador 0-9 o K).
     """
     rut_limpio = re.sub(r'[^0-9kK]', '', str(rut_str)).upper()
-    if len(rut_limpio) < 2:
-        raise ValidationError('El RUT ingresado no posee un largo suficiente.')
+    if len(rut_limpio) < 7 or len(rut_limpio) > 10:
+        raise ValidationError('El RUT ingresado debe tener entre 7 y 9 dígitos más el verificador.')
 
     cuerpo = rut_limpio[:-1]
     dv_ingresado = rut_limpio[-1]
@@ -40,33 +21,14 @@ def validar_rut_chileno(rut_str):
     if not cuerpo.isdigit():
         raise ValidationError('El cuerpo del RUT debe contener únicamente dígitos numéricos.')
 
-    suma = 0
-    multiplicador = 2
-    for c in reversed(cuerpo):
-        suma += int(c) * multiplicador
-        multiplicador = 2 if multiplicador == 7 else multiplicador + 1
-
-    resto = suma % 11
-    resultado = 11 - resto
-    if resultado == 11:
-        dv_esperado = '0'
-    elif resultado == 10:
-        dv_esperado = 'K'
-    else:
-        dv_esperado = str(resultado)
-
-    if dv_ingresado != dv_esperado:
-        raise ValidationError(f'El dígito verificador del RUT ({dv_ingresado}) no es válido.')
+    if not (dv_ingresado.isdigit() or dv_ingresado == 'K'):
+        raise ValidationError('El dígito verificador debe ser un número del 0 al 9 o la letra K.')
 
 
 # ==============================================================================
-# MODELO: PERFIL DE USUARIO Y CONTROL DE ROLES (RBAC)
+# MODELO: PERFIL DE USUARIO Y CONTROL DE ROLES (RBAC) ENRIQUECIDO
 # ==============================================================================
 class PerfilUsuario(models.Model):
-    """
-    Extensión del modelo User de Django mediante relación OneToOne.
-    Almacena el rol RBAC (ADMIN_FLOTA o PASAJERO) y datos de contacto complementarios.
-    """
     ROLES = [
         ('ADMIN_FLOTA', 'Administrador de Flota'),
         ('PASAJERO', 'Pasajero Cliente'),
@@ -84,11 +46,34 @@ class PerfilUsuario(models.Model):
         default='PASAJERO',
         verbose_name='Rol en la Plataforma'
     )
+    rut = models.CharField(
+        max_length=12,
+        blank=True,
+        null=True,
+        verbose_name='RUT del Pasajero'
+    )
     telefono = models.CharField(
         max_length=20,
         blank=True,
         null=True,
         verbose_name='Teléfono de Contacto'
+    )
+    fecha_nacimiento = models.DateField(
+        blank=True,
+        null=True,
+        verbose_name='Fecha de Nacimiento'
+    )
+    contacto_emergencia_nombre = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='Nombre Contacto de Emergencia'
+    )
+    contacto_emergencia_telefono = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        verbose_name='Teléfono de Emergencia'
     )
 
     class Meta:
@@ -96,16 +81,42 @@ class PerfilUsuario(models.Model):
         verbose_name_plural = 'Perfiles de Usuario'
 
     def __str__(self):
-        return f'{self.usuario.username} - {self.get_rol_display()}'
+        return f'{self.usuario.username} ({self.rut or "Sin RUT"}) - {self.get_rol_display()}'
+
+
+# ==============================================================================
+# MODELO: CHOICES DINÁMICOS - TIPO DE ASIENTO (ADMINISTRABLE EN ADMIN Y API)
+# ==============================================================================
+class TipoAsiento(models.Model):
+    codigo = models.CharField(
+        max_length=30,
+        unique=True,
+        verbose_name='Código Interno (ej: SEMICAMA, SALON_CAMA)'
+    )
+    nombre = models.CharField(
+        max_length=50,
+        verbose_name='Nombre Visible (ej: Semicama, Salón Cama)'
+    )
+    multiplicador_precio = models.DecimalField(
+        max_digits=4,
+        decimal_places=2,
+        default=Decimal('1.00'),
+        verbose_name='Multiplicador de Tarifa (ej: 1.00 o 1.20)'
+    )
+
+    class Meta:
+        verbose_name = 'Tipo de Asiento'
+        verbose_name_plural = 'Tipos de Asiento'
+        ordering = ['multiplicador_precio']
+
+    def __str__(self):
+        return f'{self.nombre} (x{self.multiplicador_precio})'
 
 
 # ==============================================================================
 # MODELO: CIUDADES Y TERMINALES
 # ==============================================================================
 class Ciudad(models.Model):
-    """
-    Representa una localidad o terminal de buses origen o destino.
-    """
     nombre = models.CharField(
         max_length=100,
         unique=True,
@@ -125,9 +136,6 @@ class Ciudad(models.Model):
 # MODELO: BUSES
 # ==============================================================================
 class Bus(models.Model):
-    """
-    Unidad de transporte vehicular identificada por su placa patente.
-    """
     patente = models.CharField(
         max_length=10,
         unique=True,
@@ -143,17 +151,9 @@ class Bus(models.Model):
 
 
 # ==============================================================================
-# MODELO: ASIENTOS / BUTACAS
+# MODELO: ASIENTOS / BUTACAS (CON TIPO DINÁMICO)
 # ==============================================================================
 class Asiento(models.Model):
-    """
-    Butaca física dentro de un bus. Aplica recargo de 20% si es SALON_CAMA.
-    """
-    TIPOS = [
-        ('SEMICAMA', 'Semicama'),
-        ('SALON_CAMA', 'Salón Cama'),
-    ]
-
     bus = models.ForeignKey(
         Bus,
         on_delete=models.CASCADE,
@@ -163,11 +163,13 @@ class Asiento(models.Model):
     numero = models.PositiveIntegerField(
         verbose_name='Número de Butaca'
     )
-    tipo = models.CharField(
-        max_length=20,
-        choices=TIPOS,
-        default='SEMICAMA',
-        verbose_name='Tipo de Asiento'
+    tipo_asiento = models.ForeignKey(
+        TipoAsiento,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='asientos',
+        verbose_name='Categoría de Asiento (Dinámico)'
     )
 
     class Meta:
@@ -176,13 +178,19 @@ class Asiento(models.Model):
         unique_together = ('bus', 'numero')
         ordering = ['numero']
 
+    @property
+    def tipo(self):
+        return self.tipo_asiento.codigo if self.tipo_asiento else 'SEMICAMA'
+
+    def get_tipo_display(self):
+        return self.tipo_asiento.nombre if self.tipo_asiento else 'Semicama'
+
     def __str__(self):
         return f'Asiento {self.numero} ({self.get_tipo_display()}) - Bus {self.bus.patente}'
 
     def calcular_precio(self, precio_base):
-        """Calcula el valor según la categoría del asiento."""
-        if self.tipo == 'SALON_CAMA':
-            return int(precio_base * 1.20)
+        if self.tipo_asiento:
+            return int(Decimal(precio_base) * self.tipo_asiento.multiplicador_precio)
         return int(precio_base)
 
 
@@ -190,9 +198,6 @@ class Asiento(models.Model):
 # MODELO: SERVICIOS / ITINERARIOS
 # ==============================================================================
 class Servicio(models.Model):
-    """
-    Recorrido programado entre dos ciudades con bus y tarifa base asignada.
-    """
     origen = models.ForeignKey(
         Ciudad,
         on_delete=models.PROTECT,
@@ -231,9 +236,6 @@ class Servicio(models.Model):
 # MODELO: CARRO DE COMPRAS DE PASAJES
 # ==============================================================================
 class CarroPasajes(models.Model):
-    """
-    Carro de compras persistente vinculado al usuario.
-    """
     usuario = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
@@ -261,9 +263,6 @@ class CarroPasajes(models.Model):
 # MODELO: ÍTEMS DEL CARRO DE COMPRAS
 # ==============================================================================
 class ItemCarro(models.Model):
-    """
-    Pasaje temporal dentro del carro de compras.
-    """
     carro = models.ForeignKey(
         CarroPasajes,
         on_delete=models.CASCADE,
@@ -282,12 +281,21 @@ class ItemCarro(models.Model):
         verbose_name='Butaca Seleccionada'
     )
     nombre_ocupante = models.CharField(
-        max_length=150,
+        max_length=100,
         verbose_name='Nombre del Ocupante'
+    )
+    apellido_ocupante = models.CharField(
+        max_length=100,
+        default='',
+        verbose_name='Apellido del Ocupante'
     )
     rut_ocupante = models.CharField(
         max_length=12,
         verbose_name='RUT del Ocupante'
+    )
+    es_menor = models.BooleanField(
+        default=False,
+        verbose_name='¿Es Menor de Edad?'
     )
     agregado_en = models.DateTimeField(
         auto_now_add=True,
@@ -300,10 +308,9 @@ class ItemCarro(models.Model):
         unique_together = ('carro', 'servicio', 'asiento')
 
     def __str__(self):
-        return f'Asiento {self.asiento.numero} para {self.nombre_ocupante}'
+        return f'Asiento {self.asiento.numero} para {self.nombre_ocupante} {self.apellido_ocupante}'.strip()
 
     def obtener_subtotal(self):
-        """Retorna subtotal según tarifa base y butaca."""
         return self.asiento.calcular_precio(self.servicio.precio_base)
 
 
@@ -311,10 +318,6 @@ class ItemCarro(models.Model):
 # MODELO: CABECERA DE VENTAS
 # ==============================================================================
 class Venta(models.Model):
-    """
-    Cabecera transaccional con ciclo de vida:
-    PENDIENTE -> PAGADO -> ENTREGADO / CANCELADO.
-    """
     ESTADOS = [
         ('PENDIENTE', 'Pendiente'),
         ('PAGADO', 'Pagado'),
@@ -352,12 +355,9 @@ class Venta(models.Model):
 
 
 # ==============================================================================
-# MODELO: BOLETOS DE PASAJE EMITIDOS
+# MODELO: BOLETOS DE PASAJE EMITIDOS (CON DATOS INDIVIDUALES POR PASAJERO)
 # ==============================================================================
 class Boleto(models.Model):
-    """
-    Título de transporte individual emitido asociado a una venta.
-    """
     venta = models.ForeignKey(
         Venta,
         on_delete=models.CASCADE,
@@ -376,12 +376,21 @@ class Boleto(models.Model):
         verbose_name='Asiento Asignado'
     )
     nombre_pasajero = models.CharField(
-        max_length=150,
+        max_length=100,
         verbose_name='Nombre del Pasajero'
+    )
+    apellido_pasajero = models.CharField(
+        max_length=100,
+        default='',
+        verbose_name='Apellido del Pasajero'
     )
     rut_pasajero = models.CharField(
         max_length=12,
         verbose_name='RUT del Pasajero'
+    )
+    es_menor = models.BooleanField(
+        default=False,
+        verbose_name='¿Es Menor de Edad?'
     )
     precio_pagado = models.PositiveIntegerField(
         verbose_name='Precio Pagado'
@@ -393,7 +402,7 @@ class Boleto(models.Model):
         unique_together = ('servicio', 'asiento', 'venta')
 
     def __str__(self):
-        return f'Boleto #{self.id} - Asiento {self.asiento.numero} ({self.nombre_pasajero})'
+        return f'Boleto #{self.id} - Asiento {self.asiento.numero} ({self.nombre_pasajero} {self.apellido_pasajero})'.strip()
 
 
 # ==============================================================================
@@ -401,8 +410,5 @@ class Boleto(models.Model):
 # ==============================================================================
 @receiver(post_save, sender=User)
 def crear_perfil_usuario_automatico(sender, instance, created, **kwargs):
-    """
-    Crea automáticamente PerfilUsuario con rol PASAJERO al registrar un usuario.
-    """
     if created:
         PerfilUsuario.objects.get_or_create(usuario=instance)

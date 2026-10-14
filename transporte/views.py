@@ -1,20 +1,4 @@
-"""
-==============================================================================
-MÓDULO DE VISTAS WEB (transporte/views.py)
-------------------------------------------------------------------------------
-Controlador de interfaz de usuario renderizada en servidor (SSR):
-1. Catálogo público de recorridos con filtrado por ciudades de origen y destino.
-2. Gestión de sesiones de autenticación (Login, Registro y Cierre de Sesión).
-3. Inspección interactiva de butacas con diferenciación tarifaria Semicama/Salón Cama.
-4. Carro de compras persistente por usuario y orquestación del Checkout.
-5. Transición atómica de estados: Creación en PENDIENTE y confirmación a PAGADO.
-6. Historial de compras y reservas ("Mis Compras") para el pasajero autenticado.
-7. Panel administrativo exclusivo para rol ADMIN_FLOTA (Gestión de Ciudades, Buses y Servicios)
-   con captura controlada de ProtectedError para integridad referencial.
-8. Vista de comprobante digital y control personalizado de errores HTTP 404.
-==============================================================================
-"""
-
+from decimal import Decimal
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
 from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
@@ -25,7 +9,7 @@ from django.utils import timezone
 from django.db import transaction, models
 
 from .models import (
-    Servicio, Asiento, Boleto, Ciudad, Bus, Venta, 
+    TipoAsiento, Servicio, Asiento, Boleto, Ciudad, Bus, Venta, 
     CarroPasajes, ItemCarro, validar_rut_chileno
 )
 
@@ -33,11 +17,6 @@ from .models import (
 # SECCIÓN 1: CONTROL DE PERMISOS Y AUTORIZACIÓN (RBAC)
 # ==============================================================================
 def es_administrador(user):
-    """
-    Evalúa si un usuario posee privilegios administrativos dentro del sistema.
-    Valida si el usuario es staff en Django o posee el rol explícito 'ADMIN_FLOTA'
-    configurado en su perfil de base de datos.
-    """
     return user.is_authenticated and (
         user.is_staff or 
         (hasattr(user, 'perfil') and user.perfil.rol == 'ADMIN_FLOTA')
@@ -47,11 +26,6 @@ def es_administrador(user):
 # SECCIÓN 2: CATÁLOGO Y BÚSQUEDA PÚBLICA DE RECORRIDOS
 # ==============================================================================
 def home(request):
-    """
-    Despliega la cartelera principal de servicios disponibles para el público general.
-    Aplica filtros de búsqueda por ciudad de origen y ciudad de destino, excluyendo
-    automáticamente los servicios cuya fecha y hora de salida ya expiraron.
-    """
     origen_id = request.GET.get('origen')
     destino_id = request.GET.get('destino')
     
@@ -70,13 +44,9 @@ def home(request):
     })
 
 # ==============================================================================
-# SECCIÓN 3: AUTENTICACIÓN Y GESTIÓN DE PASAJEROS
+# SECCIÓN 3: AUTENTICACIÓN Y GESTIÓN DE PASAJEROS ENRIQUECIDA
 # ==============================================================================
 def login_view(request):
-    """
-    Procesa el inicio de sesión web validando las credenciales proporcionadas.
-    Autentica contra la tabla de usuarios de Django y redirige al catálogo principal.
-    """
     if request.method == 'POST':
         user_input = request.POST.get('username')
         pass_input = request.POST.get('password')
@@ -88,45 +58,66 @@ def login_view(request):
     return render(request, 'login.html')
 
 def logout_view(request):
-    """
-    Cierra la sesión activa del usuario y limpia las cookies de autenticación.
-    """
     auth_logout(request)
     return redirect('home')
 
 def registro_view(request):
     """
-    Registra nuevos usuarios pasajeros en la plataforma.
-    Crea automáticamente su instancia de CarroPasajes en la base de datos
-    para asegurar persistencia inmediata en sus compras futuras.
+    Registra nuevos usuarios pasajeros con ficha completa de transporte interurbano:
+    Nombres, Apellidos, Email, RUT, Teléfono, Fecha de nacimiento y Contacto de Emergencia.
     """
     if request.method == 'POST':
-        user_input = request.POST.get('username')
-        pass_input = request.POST.get('password')
+        user_input = request.POST.get('username', '').strip()
+        pass_input = request.POST.get('password', '')
+        nombres_input = request.POST.get('first_name', '').strip()
+        apellidos_input = request.POST.get('last_name', '').strip()
+        email_input = request.POST.get('email', '').strip()
+        rut_input = request.POST.get('rut', '').strip()
+        telefono_input = request.POST.get('telefono', '').strip()
+        fecha_nac_input = request.POST.get('fecha_nacimiento', '').strip()
+        emergencia_nombre = request.POST.get('contacto_emergencia_nombre', '').strip()
+        emergencia_fono = request.POST.get('contacto_emergencia_telefono', '').strip()
+
         if User.objects.filter(username=user_input).exists():
             messages.error(request, 'El nombre de usuario ya está registrado.')
-        else:
-            user = User.objects.create_user(username=user_input, password=pass_input)
-            CarroPasajes.objects.create(usuario=user)
-            auth_login(request, user)
-            messages.success(request, 'Cuenta creada exitosamente.')
-            return redirect('home')
+            return render(request, 'registro.html')
+
+        if rut_input:
+            try:
+                validar_rut_chileno(rut_input)
+            except ValidationError as e:
+                messages.error(request, str(e.message))
+                return render(request, 'registro.html')
+
+        user = User.objects.create_user(
+            username=user_input,
+            password=pass_input,
+            first_name=nombres_input,
+            last_name=apellidos_input,
+            email=email_input
+        )
+        perfil = user.perfil
+        perfil.rut = rut_input or None
+        perfil.telefono = telefono_input or None
+        if fecha_nac_input:
+            perfil.fecha_nacimiento = fecha_nac_input
+        perfil.contacto_emergencia_nombre = emergencia_nombre or None
+        perfil.contacto_emergencia_telefono = emergencia_fono or None
+        perfil.save()
+
+        CarroPasajes.objects.create(usuario=user)
+        auth_login(request, user)
+        messages.success(request, 'Ficha de pasajero y cuenta creadas exitosamente.')
+        return redirect('home')
     return render(request, 'registro.html')
 
 # ==============================================================================
-# SECCIÓN 4: DETALLE DE SERVICIO Y MAPA DE ASIENTOS
+# SECCIÓN 4: DETALLE DE SERVICIO, MAPA DE ASIENTOS Y COMPRA MÚLTIPLE
 # ==============================================================================
 def detalle_servicio(request, servicio_id):
-    """
-    Genera el mapa visual de asientos para un servicio seleccionado.
-    Calcula dinámicamente el recargo según la categoría del asiento (+20% Salón Cama).
-    Identifica asientos ocupados exclusivamente si forman parte de ventas PAGADO o ENTREGADO.
-    Valida el RUT chileno con algoritmo Módulo 11 antes de permitir añadir al carro.
-    """
     servicio = get_object_or_404(Servicio, id=servicio_id)
-    asientos_query = servicio.bus.asientos.all().order_by('numero')
+    asientos_query = servicio.bus.asientos.select_related('tipo_asiento').all().order_by('numero')
     
-    # Asientos comprometidos por compras efectivas
     ocupados = list(Boleto.objects.filter(
         servicio=servicio, 
         venta__estado__in=['PAGADO', 'ENTREGADO']
@@ -145,40 +136,86 @@ def detalle_servicio(request, servicio_id):
             messages.info(request, 'Debes iniciar sesión para agregar pasajes al carro.')
             return redirect('login')
             
-        asiento_id = request.POST.get('asiento_id')
-        rut = request.POST.get('rut', '').strip()
-        nombre = request.POST.get('nombre', '').strip()
-        
-        if not asiento_id or not rut or not nombre:
-            messages.error(request, 'Todos los campos son obligatorios.')
-            return redirect('detalle_servicio', servicio_id=servicio.id)
-            
-        try:
-            validar_rut_chileno(rut)
-        except ValidationError as e:
-            messages.error(request, str(e.message))
-            return redirect('detalle_servicio', servicio_id=servicio.id)
-            
-        asiento_obj = get_object_or_404(Asiento, id=asiento_id, bus=servicio.bus)
+        asientos_ids = request.POST.getlist('asientos_ids')
+        if not asientos_ids and request.POST.get('asiento_id'):
+            asientos_ids = [request.POST.get('asiento_id')]
 
-        if Boleto.objects.filter(servicio=servicio, asiento=asiento_obj, venta__estado__in=['PAGADO', 'ENTREGADO']).exists():
-            messages.error(request, 'El asiento seleccionado ya fue adquirido.')
+        if not asientos_ids:
+            messages.error(request, 'Debes seleccionar al menos un asiento del mapa.')
             return redirect('detalle_servicio', servicio_id=servicio.id)
+
+        pasajeros_validados = []
+        ruts_en_seleccion = set()
+
+        for a_id in asientos_ids:
+            nombre = request.POST.get(f'nombre_{a_id}', request.POST.get('nombre', '')).strip()
+            apellido = request.POST.get(f'apellido_{a_id}', request.POST.get('apellido', '')).strip()
+            rut = request.POST.get(f'rut_{a_id}', request.POST.get('rut', '')).strip()
+            es_menor = request.POST.get(f'es_menor_{a_id}') == 'on'
+
+            if not nombre or not apellido or not rut:
+                messages.error(request, 'Todos los campos (Nombre, Apellido y RUT) son obligatorios para cada pasajero.')
+                return redirect('detalle_servicio', servicio_id=servicio.id)
+
+            try:
+                validar_rut_chileno(rut)
+            except ValidationError as e:
+                messages.error(request, f'RUT ({rut}): {e.message}')
+                return redirect('detalle_servicio', servicio_id=servicio.id)
+
+            rut_normalizado = rut.upper().replace('.', '')
+            if rut_normalizado in ruts_en_seleccion:
+                messages.error(request, f'No puedes repetir el mismo RUT ({rut}) en dos asientos distintos del mismo viaje.')
+                return redirect('detalle_servicio', servicio_id=servicio.id)
+            ruts_en_seleccion.add(rut_normalizado)
+
+            asiento_obj = get_object_or_404(Asiento, id=a_id, bus=servicio.bus)
+            if Boleto.objects.filter(servicio=servicio, asiento=asiento_obj, venta__estado__in=['PAGADO', 'ENTREGADO']).exists():
+                messages.error(request, f'El asiento #{asiento_obj.numero} ya fue adquirido.')
+                return redirect('detalle_servicio', servicio_id=servicio.id)
+
+            pasajeros_validados.append({
+                'asiento': asiento_obj,
+                'nombre': nombre,
+                'apellido': apellido,
+                'rut': rut,
+                'es_menor': es_menor
+            })
 
         carro, _ = CarroPasajes.objects.get_or_create(usuario=request.user)
-        
-        if ItemCarro.objects.filter(carro=carro, servicio=servicio, asiento=asiento_obj).exists():
-            messages.warning(request, 'Este pasaje ya está en tu carro de compras.')
-            return redirect('ver_carro')
-            
-        ItemCarro.objects.create(
+
+        # REGLA DE NEGOCIO: Un menor de edad NO puede viajar solo.
+        hay_menor_en_seleccion = any(p['es_menor'] for p in pasajeros_validados)
+        hay_adulto_en_seleccion = any(not p['es_menor'] for p in pasajeros_validados)
+        hay_adulto_en_carro_mismo_servicio = ItemCarro.objects.filter(
             carro=carro,
             servicio=servicio,
-            asiento=asiento_obj,
-            nombre_ocupante=nombre,
-            rut_ocupante=rut
-        )
-        messages.success(request, f'Asiento #{asiento_obj.numero} agregado al carro.')
+            es_menor=False
+        ).exclude(asiento_id__in=asientos_ids).exists()
+
+        if hay_menor_en_seleccion and not (hay_adulto_en_seleccion or hay_adulto_en_carro_mismo_servicio):
+            messages.error(
+                request,
+                'No se permite que un menor de edad viaje solo. Debes incluir al menos un pasajero adulto en la compra para este recorrido.'
+            )
+            return redirect('detalle_servicio', servicio_id=servicio.id)
+
+        agregados = 0
+        for p in pasajeros_validados:
+            ItemCarro.objects.update_or_create(
+                carro=carro,
+                servicio=servicio,
+                asiento=p['asiento'],
+                defaults={
+                    'nombre_ocupante': p['nombre'],
+                    'apellido_ocupante': p['apellido'],
+                    'rut_ocupante': p['rut'],
+                    'es_menor': p['es_menor']
+                }
+            )
+            agregados += 1
+
+        messages.success(request, f'Se agregaron {agregados} pasaje(s) al carro de compras.')
         return redirect('ver_carro')
         
     return render(request, 'servicio_detalle.html', {
@@ -194,12 +231,8 @@ def detalle_servicio(request, servicio_id):
 # ==============================================================================
 @login_required(login_url='login')
 def ver_carro(request):
-    """
-    Muestra la lista de pasajes agregados por el usuario autenticado,
-    calculando subtotales por tipo de asiento y el monto global de la orden.
-    """
     carro, _ = CarroPasajes.objects.get_or_create(usuario=request.user)
-    items = carro.items.select_related('servicio', 'asiento').all()
+    items = carro.items.select_related('servicio', 'asiento', 'asiento__tipo_asiento').all()
     
     items_detalle = []
     total = 0
@@ -219,28 +252,46 @@ def ver_carro(request):
 
 @login_required(login_url='login')
 def eliminar_item_carro(request, item_id):
-    """
-    Elimina un ítem específico del carro de compras del usuario autenticado.
-    """
     carro = get_object_or_404(CarroPasajes, usuario=request.user)
-    ItemCarro.objects.filter(carro=carro, id=item_id).delete()
+    item = get_object_or_404(ItemCarro, carro=carro, id=item_id)
+    servicio = item.servicio
+
+    if not item.es_menor:
+        otros_items_servicio = ItemCarro.objects.filter(carro=carro, servicio=servicio).exclude(id=item.id)
+        hay_menores = otros_items_servicio.filter(es_menor=True).exists()
+        hay_otros_adultos = otros_items_servicio.filter(es_menor=False).exists()
+        if hay_menores and not hay_otros_adultos:
+            messages.error(
+                request,
+                'No puedes quitar el pasaje del único adulto porque quedaría un menor de edad viajando solo en ese recorrido. Elimina primero el pasaje del menor.'
+            )
+            return redirect('ver_carro')
+
+    item.delete()
     messages.info(request, 'Pasaje retirado del carro.')
     return redirect('ver_carro')
 
 @login_required(login_url='login')
 @transaction.atomic
 def procesar_checkout(request):
-    """
-    FASE 1 DEL CICLO: Transforma el carro en una Venta en estado PENDIENTE.
-    Crea los registros de Boleto asociados sin bloquear stock definitivamente
-    y vacía el carro de compras del usuario.
-    """
     carro = get_object_or_404(CarroPasajes, usuario=request.user)
-    items = list(carro.items.select_related('servicio', 'asiento').all())
+    items = list(carro.items.select_related('servicio', 'asiento', 'asiento__tipo_asiento').all())
     
     if not items:
         messages.error(request, 'Tu carro está vacío.')
         return redirect('home')
+
+    servicios_en_carro = set(i.servicio for i in items)
+    for srv in servicios_en_carro:
+        items_srv = [i for i in items if i.servicio_id == srv.id]
+        tiene_menores = any(i.es_menor for i in items_srv)
+        tiene_adultos = any(not i.es_menor for i in items_srv)
+        if tiene_menores and not tiene_adultos:
+            messages.error(
+                request,
+                f'Error en recorrido {srv.origen.nombre} -> {srv.destino.nombre}: Un menor de edad no puede viajar solo sin un adulto acompañante.'
+            )
+            return redirect('ver_carro')
 
     total = sum(item.obtener_subtotal() for item in items)
     venta = Venta.objects.create(
@@ -256,7 +307,9 @@ def procesar_checkout(request):
             servicio=item.servicio,
             asiento=item.asiento,
             nombre_pasajero=item.nombre_ocupante,
+            apellido_pasajero=item.apellido_ocupante,
             rut_pasajero=item.rut_ocupante,
+            es_menor=item.es_menor,
             precio_pagado=item.obtener_subtotal()
         )
 
@@ -267,12 +320,6 @@ def procesar_checkout(request):
 @login_required(login_url='login')
 @transaction.atomic
 def pagar_orden_web(request, venta_id):
-    """
-    FASE 2 DEL CICLO: Confirmación definitiva del pago de una orden PENDIENTE.
-    Ejecuta select_for_update sobre los registros de Asiento involucrados
-    para garantizar atomicidad y protección contra sobreventa en concurrencia.
-    Si otro usuario pagó el mismo asiento previamente, se aborta la transacción.
-    """
     venta = get_object_or_404(Venta, id=venta_id, usuario=request.user)
 
     if venta.estado != 'PENDIENTE':
@@ -283,7 +330,6 @@ def pagar_orden_web(request, venta_id):
     boletos = list(venta.boletos.select_related('servicio', 'asiento').all())
     asientos_ids = [b.asiento_id for b in boletos]
 
-    # Bloqueo pesimista a nivel de base de datos
     list(Asiento.objects.filter(id__in=asientos_ids).select_for_update())
 
     for b in boletos:
@@ -302,10 +348,6 @@ def pagar_orden_web(request, venta_id):
 
 @login_required(login_url='login')
 def cancelar_orden_web(request, venta_id):
-    """
-    Transición a estado CANCELADO para órdenes en PENDIENTE o PAGADO.
-    Libera los asientos automáticamente para que vuelvan a estar disponibles.
-    """
     venta = get_object_or_404(Venta, id=venta_id, usuario=request.user)
     if venta.estado in ['PENDIENTE', 'PAGADO']:
         venta.estado = 'CANCELADO'
@@ -317,10 +359,6 @@ def cancelar_orden_web(request, venta_id):
     return redirect('comprobante', boleto_id=primer_boleto.id)
 
 def comprobante(request, boleto_id):
-    """
-    Muestra la orden de compra y el boleto emitido. Si el estado es PENDIENTE,
-    ofrece los botones interactivos para confirmar pago o cancelar la reserva.
-    """
     boleto = get_object_or_404(Boleto, id=boleto_id)
     return render(request, 'comprobante.html', {
         'boleto': boleto,
@@ -329,25 +367,15 @@ def comprobante(request, boleto_id):
 
 @login_required(login_url='login')
 def mis_compras_view(request):
-    """
-    Despliega el historial de compras del usuario autenticado.
-    Permite visualizar órdenes en estado PENDIENTE (con botón para pagar o cancelar)
-    y boletos emitidos en estado PAGADO o ENTREGADO.
-    """
-    ventas = Venta.objects.filter(usuario=request.user).prefetch_related('boletos__servicio', 'boletos__asiento').order_by('-fecha_venta')
+    ventas = Venta.objects.filter(usuario=request.user).prefetch_related(
+        'boletos__servicio', 'boletos__asiento', 'boletos__asiento__tipo_asiento'
+    ).order_by('-fecha_venta')
     return render(request, 'mis_compras.html', {'ventas': ventas})
 
 # ==============================================================================
 # SECCIÓN 6: PANEL ADMINISTRATIVO DE FLOTA (ADMIN_FLOTA)
 # ==============================================================================
 def gestion_servicios(request):
-    """
-    Panel de control integral para administradores de flota.
-    Permite la administración de tres entidades del negocio:
-    1. Ciudades (Crear, Editar, Eliminar con restricción de integridad).
-    2. Buses (Crear con generación automática de asientos, Editar, Eliminar).
-    3. Servicios (Publicar recorridos con validación temporal, Editar y Eliminar).
-    """
     if not es_administrador(request.user):
         messages.error(request, 'Acceso denegado: Requiere rol ADMIN_FLOTA.')
         return redirect('home')
@@ -360,9 +388,6 @@ def gestion_servicios(request):
     if request.method == 'POST':
         accion = request.POST.get('accion')
 
-        # ----------------------------------------------------------------------
-        # SUBSECCIÓN 6.1: GESTIÓN DE CIUDADES
-        # ----------------------------------------------------------------------
         if accion == 'crear_ciudad':
             nombre = request.POST.get('nombre_ciudad', '').strip()
             if nombre:
@@ -396,9 +421,6 @@ def gestion_servicios(request):
                     messages.error(request, f'No se puede eliminar "{ciudad.nombre}": tiene registros protegidos asociados.')
             return redirect('gestion_servicios')
 
-        # ----------------------------------------------------------------------
-        # SUBSECCIÓN 6.2: GESTIÓN DE BUSES
-        # ----------------------------------------------------------------------
         elif accion == 'crear_bus':
             patente = request.POST.get('patente', '').strip().upper()
             try:
@@ -409,12 +431,20 @@ def gestion_servicios(request):
             if Bus.objects.filter(patente=patente).exists():
                 messages.error(request, f'Ya existe un bus con la patente {patente}.')
             else:
+                tipo_cama, _ = TipoAsiento.objects.get_or_create(
+                    codigo='SALON_CAMA',
+                    defaults={'nombre': 'Salón Cama', 'multiplicador_precio': Decimal('1.20')}
+                )
+                tipo_semi, _ = TipoAsiento.objects.get_or_create(
+                    codigo='SEMICAMA',
+                    defaults={'nombre': 'Semicama', 'multiplicador_precio': Decimal('1.00')}
+                )
                 bus = Bus.objects.create(patente=patente)
                 asientos = [
                     Asiento(
                         bus=bus, 
                         numero=n, 
-                        tipo='SALON_CAMA' if n <= 10 else 'SEMICAMA'
+                        tipo_asiento=tipo_cama if n <= 10 else tipo_semi
                     )
                     for n in range(1, capacidad + 1)
                 ]
@@ -449,9 +479,6 @@ def gestion_servicios(request):
                     messages.error(request, f'No se puede eliminar el bus {bus.patente}: tiene registros protegidos asociados.')
             return redirect('gestion_servicios')
 
-        # ----------------------------------------------------------------------
-        # SUBSECCIÓN 6.3: GESTIÓN DE SERVICIOS E ITINERARIOS
-        # ----------------------------------------------------------------------
         elif accion == 'crear_servicio':
             origen_id = request.POST.get('origen')
             destino_id = request.POST.get('destino')
@@ -522,7 +549,6 @@ def gestion_servicios(request):
             servicio_id = request.POST.get('servicio_id')
             servicio = get_object_or_404(Servicio, id=servicio_id)
 
-            # Verifica si tiene boletos asociados
             if Boleto.objects.filter(servicio=servicio).exists():
                 messages.error(request, f'No se puede eliminar el servicio #{servicio_id}: tiene boletos registrados asociados.')
             else:
@@ -548,8 +574,4 @@ def gestion_servicios(request):
 # SECCIÓN 7: CONTROLADOR DE ERROR 404 PERSONALIZADO
 # ==============================================================================
 def error_404_view(request, exception=None):
-    """
-    Renderiza la plantilla personalizada 404.html ante solicitudes inexistentes
-    asegurando una experiencia controlada en producción con código HTTP 404.
-    """
     return render(request, '404.html', status=404)

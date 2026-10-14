@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Seleccionar Asiento - {{ servicio.origen.nombre }} a {{ servicio.destino.nombre }}{% endblock %}
+{% block title %}Seleccionar Asientos - {{ servicio.origen.nombre }} a {{ servicio.destino.nombre }}{% endblock %}
 
 {% block content %}
 <div class="row">
@@ -44,31 +44,32 @@
         </div>
     </div>
 
-    <!-- Panel Derecho: Disposición del Bus y Formulario -->
+    <!-- Panel Derecho: Disposición del Bus y Formularios Dinámicos por Pasajero -->
     <div class="col-lg-8">
         <div class="card shadow-sm border-0 p-4 rounded-4">
             <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
-                <h4 class="fw-bold mb-0">Selecciona tu Asiento</h4>
+                <div>
+                    <h4 class="fw-bold mb-0">Selecciona uno o más Asientos</h4>
+                    <small class="text-muted">Haz clic en los asientos que desees comprar para ingresar los datos de cada pasajero</small>
+                </div>
                 <span class="badge bg-dark px-3 py-2 fs-6">Frente del Bus 🚌</span>
             </div>
             
-            <form method="POST">
+            <form method="POST" id="formCompraMultiple">
                 {% csrf_token %}
                 
-                <!-- Mapa de Asientos -->
+                <!-- Mapa de Asientos (Selección Múltiple con Checkbox) -->
                 <div class="p-3 rounded-4 bg-light border mb-4">
                     <div class="row g-2 justify-content-center">
                         {% for a in asientos %}
                             <div class="col-4 col-sm-3 col-md-2 text-center">
                                 {% if a.id in ocupados %}
-                                    <!-- ASIENTO COMPRADO: ROJO TOTALMENTE VISIBLE -->
                                     <button type="button" class="btn btn-danger w-100 py-2 border-0 shadow-sm disabled" style="background-color: #dc3545 !important; cursor: not-allowed;" title="Asiento ya comprado">
                                         <div class="fw-bold fs-6">#{{ a.numero }}</div>
                                         <span class="badge bg-dark mt-1" style="font-size: 0.60rem;">OCUPADO</span>
                                     </button>
                                 {% else %}
-                                    <!-- ASIENTO DISPONIBLE -->
-                                    <input type="radio" class="btn-check" name="asiento_id" id="asiento_{{ a.id }}" value="{{ a.id }}" required>
+                                    <input type="checkbox" class="btn-check check-asiento" name="asientos_ids" id="asiento_{{ a.id }}" value="{{ a.id }}" data-numero="{{ a.numero }}" data-tipo="{{ a.get_tipo_display }}" data-precio="{{ a.precio_calculado }}">
                                     <label class="btn {% if a.tipo == 'SALON_CAMA' %}btn-outline-primary{% else %}btn-outline-success text-dark{% endif %} w-100 py-2 shadow-sm" for="asiento_{{ a.id }}">
                                         <div class="fw-bold fs-6">#{{ a.numero }}</div>
                                         <div style="font-size: 0.65rem;" class="fw-bold text-uppercase">{{ a.get_tipo_display }}</div>
@@ -80,26 +81,81 @@
                     </div>
                 </div>
 
-                <!-- Datos del Pasajero -->
-                <div class="card border-0 bg-white p-3 mb-4 border rounded-3 shadow-sm">
-                    <h5 class="fw-bold mb-3 text-secondary">Datos del Pasajero Ocupante</h5>
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            <label class="form-label small fw-bold">Nombre Completo</label>
-                            <input type="text" name="nombre" class="form-control" placeholder="Ej: Marcelo González" required>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label small fw-bold">RUT </label>
-                            <input type="text" name="rut" class="form-control" placeholder="Ej: 19876543-2" required>
-                        </div>
+                <!-- Contenedor Dinámico de Pasajeros Individuales -->
+                <div id="contenedorPasajeros" class="mb-4">
+                    <div class="alert alert-secondary text-center mb-0" id="mensajeSinSeleccion">
+                        <i class="bi bi-hand-index-thumb me-1"></i> Selecciona al menos un asiento en el mapa superior para completar los datos del pasajero.
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-success btn-lg w-100 fw-bold shadow">
-                    🛒 Agregar Asiento al Carro
+                <button type="submit" id="btnSubmitCarro" class="btn btn-success btn-lg w-100 fw-bold shadow" disabled>
+                    🛒 Agregar Pasaje(s) al Carro
                 </button>
             </form>
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const checkboxes = document.querySelectorAll('.check-asiento');
+    const contenedor = document.getElementById('contenedorPasajeros');
+    const mensajeVacio = document.getElementById('mensajeSinSeleccion');
+    const btnSubmit = document.getElementById('btnSubmitCarro');
+
+    checkboxes.forEach(chk => {
+        chk.addEventListener('change', function() {
+            const id = this.value;
+            const numero = this.dataset.numero;
+            const tipo = this.dataset.tipo;
+            const precio = this.dataset.precio;
+            const cardId = `card_pasajero_${id}`;
+
+            if (this.checked) {
+                const div = document.createElement('div');
+                div.className = 'card border bg-white p-3 mb-3 rounded-3 shadow-sm';
+                div.id = cardId;
+                div.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center mb-2 pb-2 border-bottom">
+                        <h6 class="fw-bold mb-0 text-primary">
+                            <i class="bi bi-person-badge me-1"></i> Pasajero - Asiento #${numero} (${tipo})
+                        </h6>
+                        <span class="badge bg-success">$${precio}</span>
+                    </div>
+                    <div class="row g-2 align-items-center">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold mb-1">Nombre</label>
+                            <input type="text" name="nombre_${id}" class="form-control form-control-sm" placeholder="Ej: Bastián" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold mb-1">Apellido</label>
+                            <input type="text" name="apellido_${id}" class="form-control form-control-sm" placeholder="Ej: González" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold mb-1">RUT</label>
+                            <input type="text" name="rut_${id}" class="form-control form-control-sm" placeholder="Ej: 19876543-2" required>
+                        </div>
+                        <div class="col-12 mt-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="es_menor_${id}" id="menor_${id}">
+                                <label class="form-check-label small fw-semibold text-secondary" for="menor_${id}">
+                                    ¿Es menor de edad?
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                contenedor.appendChild(div);
+            } else {
+                const existente = document.getElementById(cardId);
+                if (existente) existente.remove();
+            }
+
+            const seleccionados = document.querySelectorAll('.check-asiento:checked').length;
+            mensajeVacio.style.display = seleccionados > 0 ? 'none' : 'block';
+            btnSubmit.disabled = seleccionados === 0;
+        });
+    });
+});
+</script>
 {% endblock %}
