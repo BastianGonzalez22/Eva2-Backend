@@ -10,10 +10,6 @@ from django.utils import timezone
 from django.db import transaction, models
 
 from transbank.webpay.webpay_plus.transaction import Transaction
-from transbank.common.options import WebpayOptions
-from transbank.common.integration_commerce_codes import IntegrationCommerceCodes
-from transbank.common.integration_api_keys import IntegrationApiKeys
-from transbank.common.integration_type import IntegrationType
 
 from .models import (
     TipoAsiento, Servicio, Asiento, Boleto, Ciudad, Bus, Venta, 
@@ -316,7 +312,6 @@ def procesar_checkout(request):
         )
 
     carro.items.all().delete()
-    messages.info(request, 'Orden generada en estado PENDIENTE. Redirigiendo a Webpay para pagar.')
     return redirect('webpay_iniciar', venta_id=venta.id)
 
 @login_required(login_url='login')
@@ -582,28 +577,18 @@ def error_404_view(request, exception=None):
 # SECCIÓN 8: INTEGRACIÓN TRANSBANK WEBPAY PLUS
 # ==============================================================================
 def webpay_iniciar(request, venta_id=None):
-    """
-    Inicia la transacción en Webpay Plus.
-    Si se proporciona venta_id, utiliza el total real de la venta.
-    Si no, usa un monto fijo de prueba de $5.000.
-    """
     if venta_id:
         venta = get_object_or_404(Venta, id=venta_id)
         amount = int(venta.total)
-        buy_order = f"ORDEN-{venta.id}"
+        buy_order = f"ORDEN{venta.id}"
     else:
         amount = 5000
-        buy_order = str(random.randint(100000, 999999))
+        buy_order = f"ORDEN{random.randint(1000, 9999)}"
 
-    session_id = str(random.randint(100000, 999999))
+    session_id = f"SESS{random.randint(1000, 9999)}"
     return_url = 'https://andessur-b.duckdns.org/transporte/webpay-retorno/'
 
-    tx = Transaction(WebpayOptions(
-        IntegrationCommerceCodes.WEBPAY_PLUS,
-        IntegrationApiKeys.WEBPAY,
-        IntegrationType.TEST
-    ))
-
+    tx = Transaction()
     response = tx.create(buy_order, session_id, amount, return_url)
 
     return render(request, 'webpay_pagar.html', {
@@ -614,9 +599,6 @@ def webpay_iniciar(request, venta_id=None):
     })
 
 def webpay_retorno(request):
-    """
-    Recibe la respuesta de Transbank tras la interacción del usuario en la pasarela.
-    """
     token = request.GET.get('token_ws') or request.POST.get('token_ws')
 
     if not token:
@@ -625,24 +607,18 @@ def webpay_retorno(request):
             'mensaje': 'Compra cancelada por el usuario en el portal de Webpay.'
         })
 
-    tx = Transaction(WebpayOptions(
-        IntegrationCommerceCodes.WEBPAY_PLUS,
-        IntegrationApiKeys.WEBPAY,
-        IntegrationType.TEST
-    ))
-
+    tx = Transaction()
     response = tx.commit(token)
 
     if response.get('status') == 'AUTHORIZED' and response.get('response_code') == 0:
-        # Si la orden vino asociada a una Venta del sistema, marcarla como PAGADA
         buy_order = response.get('buy_order', '')
-        if buy_order.startswith('ORDEN-'):
+        if buy_order.startswith('ORDEN'):
             try:
-                v_id = int(buy_order.replace('ORDEN-', ''))
+                v_id = int(buy_order.replace('ORDEN', ''))
                 venta = Venta.objects.get(id=v_id)
                 venta.estado = 'PAGADO'
                 venta.save()
-            except (Venta.DoesNotExist, ValueError):
+            except Exception:
                 pass
 
         return render(request, 'webpay_resultado.html', {
