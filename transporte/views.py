@@ -1,3 +1,4 @@
+import random
 from decimal import Decimal
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
@@ -7,6 +8,12 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.db import transaction, models
+
+from transbank.webpay.webpay_plus.transaction import Transaction
+from transbank.common.options import WebpayOptions
+from transbank.common.integration_commerce_codes import IntegrationCommerceCodes
+from transbank.common.integration_api_keys import IntegrationApiKeys
+from transbank.common.integration_type import IntegrationType
 
 from .models import (
     TipoAsiento, Servicio, Asiento, Boleto, Ciudad, Bus, Venta, 
@@ -62,10 +69,6 @@ def logout_view(request):
     return redirect('home')
 
 def registro_view(request):
-    """
-    Registra nuevos usuarios pasajeros con ficha completa de transporte interurbano:
-    Nombres, Apellidos, Email, RUT, Teléfono, Fecha de nacimiento y Contacto de Emergencia.
-    """
     if request.method == 'POST':
         user_input = request.POST.get('username', '').strip()
         pass_input = request.POST.get('password', '')
@@ -184,7 +187,6 @@ def detalle_servicio(request, servicio_id):
 
         carro, _ = CarroPasajes.objects.get_or_create(usuario=request.user)
 
-        # REGLA DE NEGOCIO: Un menor de edad NO puede viajar solo.
         hay_menor_en_seleccion = any(p['es_menor'] for p in pasajeros_validados)
         hay_adulto_en_seleccion = any(not p['es_menor'] for p in pasajeros_validados)
         hay_adulto_en_carro_mismo_servicio = ItemCarro.objects.filter(
@@ -314,8 +316,8 @@ def procesar_checkout(request):
         )
 
     carro.items.all().delete()
-    messages.info(request, 'Orden generada en estado PENDIENTE. Confirma tu pago a continuación.')
-    return redirect('comprobante', boleto_id=ultimo_boleto.id)
+    messages.info(request, 'Orden generada en estado PENDIENTE. Redirigiendo a Webpay para pagar.')
+    return redirect('webpay_iniciar', venta_id=venta.id)
 
 @login_required(login_url='login')
 @transaction.atomic
@@ -575,3 +577,80 @@ def gestion_servicios(request):
 # ==============================================================================
 def error_404_view(request, exception=None):
     return render(request, '404.html', status=404)
+
+# ==============================================================================
+# SECCIÓN 8: INTEGRACIÓN TRANSBANK WEBPAY PLUS
+# ==============================================================================
+def webpay_iniciar(request, venta_id=None):
+    """
+    Inicia la transacción en Webpay Plus.
+    Si se proporciona venta_id, utiliza el total real de la venta.
+    Si no, usa un monto fijo de prueba de $5.000.
+    """
+    if venta_id:
+        venta = get_object_or_404(Venta, id=venta_id)
+        amount = int(venta.total)
+        buy_order = f"ORDEN-{venta.id}"
+    else:
+        amount = 5000
+        buy_order = str(random.randint(100000, 999999))
+
+    session_id = str(random.randint(100000, 999999))
+    return_url = 'https://andessur-b.duckdns.org/transporte/webpay-retorno/'
+
+    tx = Transaction(WebpayOptions(
+        IntegrationCommerceCodes.WEBPAY_PLUS,
+        IntegrationApiKeys.WEBPAY,
+        IntegrationType.TEST
+    ))
+
+    response = tx.create(buy_order, session_id, amount, return_url)
+
+    return render(request, 'webpay_pagar.html', {
+        'url': response['url'],
+        'token': response['token'],
+        'amount': amount,
+        'buy_order': buy_order
+    })
+
+def webpay_retorno(request):
+    """
+    Recibe la respuesta de Transbank tras la interacción del usuario en la pasarela.
+    """
+    token = request.GET.get('token_ws') or request.POST.get('token_ws')
+
+    if not token:
+        return render(request, 'webpay_resultado.html', {
+            'status': 'RECHAZADO',
+            'mensaje': 'Compra cancelada por el usuario en el portal de Webpay.'
+        })
+
+    tx = Transaction(WebpayOptions(
+        IntegrationCommerceCodes.WEBPAY_PLUS,
+        IntegrationApiKeys.WEBPAY,
+        IntegrationType.TEST
+    ))
+
+    response = tx.commit(token)
+
+    if response.get('status') == 'AUTHORIZED' and response.get('response_code') == 0:
+        # Si la orden vino asociada a una Venta del sistema, marcarla como PAGADA
+        buy_order = response.get('buy_order', '')
+        if buy_order.startswith('ORDEN-'):
+            try:
+                v_id = int(buy_order.replace('ORDEN-', ''))
+                venta = Venta.objects.get(id=v_id)
+                venta.estado = 'PAGADO'
+                venta.save()
+            except (Venta.DoesNotExist, ValueError):
+                pass
+
+        return render(request, 'webpay_resultado.html', {
+            'status': 'APROBADO',
+            'response': response
+        })
+    else:
+        return render(request, 'webpay_resultado.html', {
+            'status': 'RECHAZADO',
+            'response': response
+        })

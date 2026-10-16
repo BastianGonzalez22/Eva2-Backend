@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Redirigiendo a Webpay...</title>
+</head>
+<body onload="document.getElementById('webpay-form').submit();" style="text-align:center; padding-top:60px; font-family:sans-serif;">
+    <h2>Conectando con Transbank Webpay Plus...</h2>
+    <p>Por favor espera un momento, serás redirigido a la pasarela de pago.</p>
+    <form id="webpay-form" action="{{ url }}" method="POST">
+        <input type="hidden" name="token_ws" value="{{ token }}">
+        <button type="submit" style="padding:10px 20px; font-size:16px; cursor:pointer;">Ir a Pagar Ahora</button>
+    </form>
+</body>
+</html>

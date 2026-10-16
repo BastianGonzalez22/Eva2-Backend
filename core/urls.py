@@ -24,6 +24,12 @@ urlpatterns = [
     path('comprobante/<int:boleto_id>/', views.comprobante, name='comprobante'),
     path('mis-compras/', views.mis_compras_view, name='mis_compras'),
     
+    # INTEGRACIÓN TRANSBANK WEBPAY PLUS
+    path('webpay-iniciar/', views.webpay_iniciar, name='webpay_iniciar_test'),
+    path('webpay-iniciar/<int:venta_id>/', views.webpay_iniciar, name='webpay_iniciar'),
+    path('transporte/webpay-retorno/', views.webpay_retorno, name='webpay_retorno'),
+    path('webpay-retorno/', views.webpay_retorno, name='webpay_retorno_directo'),
+
     path('gestion/', views.gestion_servicios, name='gestion_servicios'),
 
     # 2. AUTENTICACIÓN JWT Y PERFIL ENRIQUECIDO
